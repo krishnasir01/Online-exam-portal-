@@ -1,0 +1,1491 @@
+<meta name='viewport' content='width=device-width, initial-scale=1'/><!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Exam Portal</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+<style>
+body { background: #f8fafc; color: #1e293b; font-family: system-ui, -apple-system, sans-serif; }
+.top-header { background: linear-gradient(90deg, #4338ca 0%, #6366f1 50%, #8b5cf6 100%); }
+.glass-card { background: #ffffff; border-radius: 20px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); }
+.badge-pub { background-color: #dcfce7; color: #15803d; font-size: 0.75rem; font-weight: 700; border-radius: 9999px; padding: 4px 12px; }
+.search-input { background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; }
+.search-input:focus { border-color: #4f46e5; background: #ffffff; outline: none; }
+.exam-item-card { border: 1.5px solid #e2e8f0; border-radius: 18px; transition: all 0.2s ease; }
+.exam-item-card:hover { border-color: #cbd5e1; box-shadow: 0 6px 16px rgba(0,0,0,0.04); }
+
+/* मेरिट लिस्ट और स्टूडेंट लिस्ट दोनों के लिए पक्की लाइनिंग */
+.table-grid { border-collapse: collapse !important; width: 100%; border: 2px solid #94a3b8 !important; }
+.table-grid th, .table-grid td { border: 1.5px solid #cbd5e1 !important; padding: 10px 12px; text-align: center; }
+.table-grid th { background-color: #e2e8f0 !important; color: #1e293b; font-weight: 800; }
+.table-grid tr:hover td { background-color: #f1f5f9; }
+
+.option-box { border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px; cursor: pointer; transition: 0.15s; }
+.option-box:hover { border-color: #6366f1; background: #f5f3ff; }
+.option-box.selected { border-color: #4338ca; background: #e0e7ff; }
+.toast-msg { position: fixed; right: 20px; bottom: 20px; z-index: 1000; padding: 12px 20px; border-radius: 12px; background: #0f172a; color: #fff; font-weight: 600; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+</style>
+</head>
+<body class="min-h-screen pb-12">
+
+<div id="toast" class="toast-msg hidden"></div>
+<div id="app"></div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCNZQE09U86piWrHItnrl6gOj5lp5odCIc",
+  authDomain: "online-smartexam.firebaseapp.com",
+  projectId: "online-smartexam",
+  storageBucket: "online-smartexam.firebasestorage.app",
+  messagingSenderId: "496019627434",
+  appId: "1:496019627434:web:86920fd700a85f1e529fd3",
+  measurementId: "G-DG0KG9N2TL"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.firestore(), storage = firebase.storage();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+let state = {
+  role: 'home',
+  student: null,
+  teacher: null,
+  exam: null,
+  answers: {},
+  startedAt: null,
+  timer: null,
+  exams: [],
+  tempQuestions: [],
+  editingExam: null,
+  sortOrder: 'new'
+};
+
+function toast(m) {
+  const t = $('toast');
+  t.textContent = m;
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 3200);
+}
+
+function renderTopBar(centerContent = '') {
+  return `
+    <header class="top-header sticky top-0 z-40 text-white shadow-md">
+      <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="text-3xl">📚</div>
+          <div>
+            <div class="font-black text-lg leading-tight">Smart Exam Portal</div>
+            <div class="text-[11px] text-indigo-100">Online Examination Platform</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          ${centerContent}
+          <button class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full" onclick="logout()">Logout</button>
+        </div>
+      </div>
+    </header>
+  `;
+}
+
+function logout() {
+  auth.signOut();
+  state.student = null;
+  state.teacher = null;
+  showHome();
+}
+
+async function hash(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+function showHome() {
+  state.role = 'home';
+  $('app').innerHTML = `
+    <header class="top-header py-4 text-white text-center shadow">
+      <h1 class="text-2xl font-black">Smart Exam Portal</h1>
+      <p class="text-xs text-indigo-100">Online Examination Platform</p>
+    </header>
+    <main class="max-w-md mx-auto p-4 mt-6">
+      <div class="glass-card p-6 border border-slate-200">
+        <div class="flex border-b border-slate-200 mb-6 pb-2 gap-4 justify-center">
+          <button id="tabStudentBtn" class="font-black pb-2 border-b-2 border-indigo-600 text-indigo-600 text-lg" onclick="switchLoginTab('student')">Student Portal</button>
+          <button id="tabTeacherBtn" class="font-bold pb-2 text-slate-500 text-lg" onclick="switchLoginTab('teacher')">Teacher Portal</button>
+        </div>
+
+        <div id="studentFormBox">
+          <form onsubmit="studentLogin(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Username</label>
+              <input id="su" required class="w-full search-input p-3 text-sm" placeholder="Username दर्ज करें">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Password</label>
+              <input id="sp" type="password" required class="w-full search-input p-3 text-sm" placeholder="Password दर्ज करें">
+            </div>
+            <button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md text-sm">विद्यार्थी लॉगिन करें</button>
+          </form>
+          <div class="flex justify-between mt-4 text-xs font-bold text-indigo-600">
+            <button onclick="studentRegister()">नया खाता बनाएं</button>
+            <button onclick="recoverStudent()">पासवर्ड भूल गए?</button>
+          </div>
+        </div>
+
+        <div id="teacherFormBox" class="hidden">
+          <form onsubmit="teacherLogin(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">पंजीकृत ईमेल</label>
+              <input id="te" type="email" required class="w-full search-input p-3 text-sm" placeholder="Email ID दर्ज करें">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Password</label>
+              <input id="tp" type="password" required class="w-full search-input p-3 text-sm" placeholder="Password दर्ज करें">
+            </div>
+            <button class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-md text-sm">शिक्षक लॉगिन करें</button>
+          </form>
+          <div class="text-center mt-4">
+            <button class="text-xs font-bold text-emerald-600" onclick="teacherRegister()">नया शिक्षक खाता बनाएं</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+function switchLoginTab(t) {
+  if (t === 'student') {
+    $('studentFormBox').classList.remove('hidden');
+    $('teacherFormBox').classList.add('hidden');
+    $('tabStudentBtn').className = "font-black pb-2 border-b-2 border-indigo-600 text-indigo-600 text-lg";
+    $('tabTeacherBtn').className = "font-bold pb-2 text-slate-500 text-lg";
+  } else {
+    $('studentFormBox').classList.add('hidden');
+    $('teacherFormBox').classList.remove('hidden');
+    $('tabTeacherBtn').className = "font-black pb-2 border-b-2 border-emerald-600 text-emerald-600 text-lg";
+    $('tabStudentBtn').className = "font-bold pb-2 text-slate-500 text-lg";
+  }
+}
+
+async function studentRegister() {
+  let name = prompt('विद्यार्थी का पूरा नाम:'); if (!name) return;
+  let cls = prompt('कक्षा चुनें (Class 6, 7, 8, 9, 10, 11-Arts, 11-Science, 12-Arts, 12-Science):', 'Class 10'); if (!cls) return;
+  let u = prompt('Username दर्ज करें:'); if (!u) return;
+  let p = prompt('Password बनाएं:'); if (!p) return;
+  let q = await db.collection('students').where('username', '==', u.trim().toLowerCase()).limit(1).get();
+  if (!q.empty) return toast('यह username पहले से मौजूद है!');
+  let ph = await hash(p);
+  await db.collection('students').add({
+    name, username: u.trim().toLowerCase(), passwordHash: ph, className: cls,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(), active: true
+  });
+  toast('खाता सफलतापूर्वक बन गया!');
+}
+
+async function studentLogin(e) {
+  e.preventDefault();
+  let u = $('su').value.trim().toLowerCase(), p = $('sp').value;
+  let q = await db.collection('students').where('username', '==', u).where('active', '==', true).limit(1).get();
+  if (q.empty) return toast('गलत Username या Password');
+  let d = q.docs[0], x = d.data();
+  if (await hash(p) !== x.passwordHash) return toast('गलत Username या Password');
+  state.student = { id: d.id, ...x };
+  studentDashboard();
+}
+
+async function recoverStudent() {
+  let u = prompt('अपना Username दर्ज करें:'); if (!u) return;
+  let q = await db.collection('students').where('username', '==', u.trim().toLowerCase()).limit(1).get();
+  if (q.empty) return toast('यह Username नहीं मिला');
+  let np = prompt('नया Password दर्ज करें:'); if (!np) return;
+  await db.collection('students').doc(q.docs[0].id).update({ passwordHash: await hash(np) });
+  toast('पासवर्ड अपडेट हो गया। अब लॉगिन करें।');
+}
+
+async function teacherLogin(e) {
+  e.preventDefault();
+  let email = $('te').value.trim().toLowerCase(), pass = $('tp').value;
+  try {
+    let cred = await auth.signInWithEmailAndPassword(email, pass);
+    let snap = await db.collection('teachers').doc(cred.user.uid).get();
+    if (!snap.exists) {
+      await db.collection('teachers').doc(cred.user.uid).set({
+        name: cred.user.displayName || email.split('@')[0],
+        email: email,
+        photoUrl: '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+    toast('लॉगिन सफल!');
+    await teacherDashboard();
+  } catch (err) {
+    toast('लॉगिन विफल: ' + err.message);
+  }
+}
+
+async function teacherRegister() {
+  let n = prompt('शिक्षक का नाम दर्ज करें:'); if (!n) return;
+  let e = prompt('Email पता दर्ज करें:'); if (!e) return;
+  let p = prompt('Password बनाएं (कम से कम 6 अक्षर):'); if (!p) return;
+  try {
+    let c = await auth.createUserWithEmailAndPassword(e, p);
+    await db.collection('teachers').doc(c.user.uid).set({
+      name: n.trim(),
+      email: e.trim(),
+      photoUrl: '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    toast('शिक्षक खाता तैयार हो गया!');
+    teacherDashboard();
+  } catch (err) {
+    toast('Error: ' + err.message);
+  }
+}
+async function studentDashboard() {
+  let snap = await db.collection('exams').where('published', '==', true).get();
+  let raw = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.deleted);
+  state.exams = dedupeList(raw);
+
+  $('app').innerHTML = `
+    ${renderTopBar(`<button class="bg-amber-500 text-white font-bold text-xs px-3 py-1.5 rounded-full" onclick="studentProfile()">📊 मेरा रिकॉर्ड</button>`)}
+    <main class="max-w-4xl mx-auto p-4">
+      <div class="glass-card p-5 mb-5 flex justify-between items-center border border-slate-200">
+        <div>
+          <h2 class="text-xl font-black">${esc(state.student.name)}</h2>
+          <p class="text-xs text-slate-500">${esc(state.student.className)} · @${esc(state.student.username)}</p>
+        </div>
+        <button class="bg-indigo-50 text-indigo-700 text-xs font-bold px-3 py-2 rounded-xl" onclick="studentDashboard()">🔄 रीफ्रेश</button>
+      </div>
+
+      <div class="glass-card p-5 mb-5 border border-slate-200">
+        <h3 class="font-black text-lg mb-3">मेरी उपलब्ध परीक्षाएं</h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <input id="studSearch" oninput="renderStudentExams()" class="w-full search-input p-3 text-xs" placeholder="🔎 परीक्षा का नाम या कोड खोजें...">
+          <input id="studSubjectSearch" oninput="renderStudentExams()" class="w-full search-input p-3 text-xs" placeholder="📚 विषय खोजें (उदा. Science, Hindi, Math)...">
+        </div>
+
+        <div id="studentExamList" class="space-y-4"></div>
+      </div>
+    </main>
+  `;
+  renderStudentExams();
+}
+
+function renderStudentExams() {
+  let q = ($('studSearch')?.value || '').toLowerCase().trim();
+  let subQ = ($('studSubjectSearch')?.value || '').toLowerCase().trim();
+  let filtered = state.exams.filter(x => {
+    let matchGeneral = ((x.name || '') + ' ' + (x.code || '')).toLowerCase().includes(q);
+    let matchSub = !subQ || (x.subject || '').toLowerCase().includes(subQ);
+    return matchGeneral && matchSub;
+  });
+
+  let box = $('studentExamList');
+  if (!box) return;
+  box.innerHTML = filtered.map(x => `
+    <div class="exam-item-card p-5 bg-white">
+      <div class="flex justify-between items-start">
+        <div>
+          <span class="badge-pub">Live Exam</span>
+          <h4 class="text-base font-black mt-2 text-slate-800">${esc(x.name)}</h4>
+          <p class="text-xs text-indigo-600 font-bold mt-1">विषय: ${esc(x.subject || 'सामान्य')} · <span class="text-slate-500">Code: ${esc(x.code)}</span></p>
+        </div>
+        <button class="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 shadow" onclick="startExam('${x.id}')">परीक्षा दें ➔</button>
+      </div>
+      <div class="border-t border-slate-100 mt-4 pt-3 flex justify-between text-xs text-slate-500">
+        <span>कुल प्रश्न: <b>${x.questions?.length || 0}</b></span>
+        <span>वर्ग: <b>${(x.classes || []).join(', ') || x.className || 'सभी'}</b></span>
+      </div>
+    </div>
+  `).join('') || '<p class="text-center py-8 text-xs text-slate-400 font-bold">इस खोज के अनुसार कोई परीक्षा नहीं मिली।</p>';
+}
+
+function startExam(id) {
+  let ex = state.exams.find(e => e.id === id);
+  if (!ex) return;
+  state.exam = ex;
+  state.answers = {};
+  state.startedAt = Date.now();
+  renderExamRun();
+}
+
+function renderExamRun() {
+  let x = state.exam;
+  clearInterval(state.timer);
+  $('app').innerHTML = `
+    <header class="top-header sticky top-0 z-40 text-white shadow p-3">
+      <div class="max-w-4xl mx-auto flex justify-between items-center">
+        <div>
+          <div class="font-bold text-sm truncate">${esc(x.name)}</div>
+          <div class="text-[11px] text-indigo-100">Attempted: <span id="attCount">0</span>/${x.questions.length}</div>
+        </div>
+        <div class="bg-black/30 px-3 py-1 rounded-full font-mono text-sm font-bold">⏱ <span id="runTime">00:00:00</span></div>
+        <button class="bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-full" onclick="submitExam()">Submit</button>
+      </div>
+    </header>
+    <main class="max-w-3xl mx-auto p-4 space-y-4">
+      ${x.questions.map((q, i) => `
+        <div class="glass-card p-5 border border-slate-200" id="qcard-${i}">
+          <div class="font-black text-sm md:text-base mb-3 flex gap-2">
+            <span class="text-indigo-600">Q${i + 1}.</span>
+            <div class="flex-1">${esc(q.text)}</div>
+          </div>
+          ${q.image ? `<img src="${esc(q.image)}" class="max-h-60 rounded-xl mb-4 border">` : ''}
+          <!-- क्षैतिज (Horizontal - md:grid-cols-4) या ऊर्ध्वाधर (Vertical - grid-cols-1) -->
+          <div class="grid ${q.horizontal ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1'} gap-2">
+            ${q.options.map((o, j) => `
+              <div class="option-box flex items-center gap-2 text-xs md:text-sm font-semibold" id="opt-${i}-${j}" onclick="selectOpt(${i}, ${j})">
+                <span class="w-6 h-6 rounded-full border border-slate-400 flex items-center justify-center text-xs font-bold">${String.fromCharCode(65 + j)}</span>
+                <span>${esc(o)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+      <button class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-2xl shadow-lg mt-6 text-base" onclick="submitExam()">✅ परीक्षा पूरी करें और जमा करें</button>
+    </main>
+  `;
+
+  state.timer = setInterval(() => {
+    let s = Math.floor((Date.now() - state.startedAt) / 1000);
+    $('runTime').textContent = fmtTime(s);
+  }, 1000);
+  if (window.MathJax) MathJax.typesetPromise();
+}
+
+function selectOpt(i, j) {
+  state.answers[i] = j;
+  document.querySelectorAll(`[id^="opt-${i}-"]`).forEach(el => el.classList.remove('selected'));
+  $(`opt-${i}-${j}`).classList.add('selected');
+  $('attCount').textContent = Object.keys(state.answers).length;
+}
+
+function fmtTime(s) {
+  let m = Math.floor(s / 60), sec = s % 60, hrs = Math.floor(m / 60);
+  m = m % 60;
+  return `${hrs.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+}
+async function submitExam() {
+  clearInterval(state.timer);
+  let total = state.exam.questions.length;
+  let correct = 0;
+  state.exam.questions.forEach((q, i) => {
+    if (state.answers[i] === q.answer) correct++;
+  });
+  let wrong = Object.keys(state.answers).length - correct;
+  let percent = total ? +((correct / total) * 100).toFixed(2) : 0;
+  let elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
+
+  let docRef = await db.collection('attempts').add({
+    examId: state.exam.id,
+    examCode: state.exam.code,
+    examName: state.exam.name,
+    studentId: state.student.id,
+    studentName: state.student.name,
+    className: state.student.className,
+    subject: state.exam.subject || '',
+    correct: correct,
+    wrong: Math.max(0, wrong),
+    total: total,
+    attempted: Object.keys(state.answers).length,
+    percent: percent,
+    elapsed: elapsed,
+    answers: state.answers,
+    questionSnapshot: state.exam.questions,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  showCelebrationResult(docRef.id, correct, total, percent, elapsed);
+}
+
+function showCelebrationResult(attId, correct, total, percent, elapsed) {
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-xl mx-auto p-4 text-center">
+      <div class="glass-card p-6 border border-slate-200 mt-6">
+        <div class="text-6xl mb-2 animate-bounce">🎉🎆🎇</div>
+        <h2 class="text-2xl font-black text-slate-800">शानदार प्रदर्शन! परीक्षा पूर्ण हुई</h2>
+        <p class="text-xs text-slate-500 mt-1">${esc(state.student.name)} · ${esc(state.exam.name)}</p>
+
+        <div class="grid grid-cols-3 gap-3 my-6">
+          <div class="bg-indigo-50 p-4 rounded-2xl">
+            <div class="text-2xl font-black text-indigo-700">${correct}/${total}</div>
+            <div class="text-xs font-bold text-slate-500 mt-1">अंक</div>
+          </div>
+          <div class="bg-emerald-50 p-4 rounded-2xl">
+            <div class="text-2xl font-black text-emerald-700">${percent}%</div>
+            <div class="text-xs font-bold text-slate-500 mt-1">प्रतिशत</div>
+          </div>
+          <div class="bg-amber-50 p-4 rounded-2xl">
+            <div class="text-2xl font-black text-amber-700">${fmtTime(elapsed)}</div>
+            <div class="text-xs font-bold text-slate-500 mt-1">समय</div>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow flex items-center justify-center gap-2 text-sm" onclick="downloadResultFile('${attId}')">
+            📥 रिज़ल्ट फाइल डाउनलोड करें (.txt)
+          </button>
+          <button class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm" onclick="downloadAnswerFile('${attId}')">
+            📄 प्रश्न-उत्तर समीक्षा फाइल डाउनलोड करें
+          </button>
+          <button class="w-full border border-slate-300 font-bold py-2.5 rounded-xl text-xs text-slate-600 mt-2" onclick="studentDashboard()">
+            ← वापस डैशबोर्ड पर जाएं
+          </button>
+        </div>
+      </div>
+    </main>
+  `;
+
+  if (window.confetti) {
+    confetti({ particleCount: 160, spread: 80, origin: { y: 0.6 } });
+    setTimeout(() => confetti({ particleCount: 120, angle: 60, spread: 60, origin: { x: 0 } }), 300);
+    setTimeout(() => confetti({ particleCount: 120, angle: 120, spread: 60, origin: { x: 1 } }), 600);
+  }
+}
+
+function downloadTextFile(filename, text) {
+  let blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  toast('फाइल डाउनलोड हो गई!');
+}
+
+async function downloadResultFile(id) {
+  let d = (await db.collection('attempts').doc(id).get()).data();
+  let content = `====================================\n        SMART EXAM PORTAL RESULT\n====================================\nविद्यार्थी का नाम : ${d.studentName}\nवर्ग             : ${d.className}\nपरीक्षा का नाम   : ${d.examName}\nपरीक्षा कोड      : ${d.examCode}\nविषय             : ${d.subject || '-'}\nकुल प्रश्न       : ${d.total}\nहल किए प्रश्न    : ${d.attempted}\nसही उत्तर        : ${d.correct}\nगलत उत्तर        : ${d.wrong}\nप्रतिशत          : ${d.percent}%\nसमय              : ${fmtTime(d.elapsed)}\nदिनांक           : ${d.createdAt?.toDate?.().toLocaleString('hi-IN') || ''}\n====================================\n`;
+  downloadTextFile(`Result_${d.examCode}_${d.studentName}.txt`, content);
+}
+
+async function downloadAnswerFile(id) {
+  let d = (await db.collection('attempts').doc(id).get()).data();
+  let out = `====================================\n    EXAM ANSWER REVIEW REPORT\n====================================\nExam: ${d.examName} (${d.examCode})\nStudent: ${d.studentName}\n\n`;
+  d.questionSnapshot.forEach((q, i) => {
+    let a = d.answers[i];
+    let correct = q.answer;
+    out += `प्रश्न ${i + 1}: ${q.text}\n`;
+    out += `आपका उत्तर : ${a == null ? 'नहीं दिया' : String.fromCharCode(65 + a) + '. ' + q.options[a]}\n`;
+    out += `सही उत्तर  : ${String.fromCharCode(65 + correct)}. ${q.options[correct]}\n`;
+    out += `परिणाम     : ${a === correct ? 'सही (CORRECT)' : 'गलत (WRONG)'}\n`;
+    out += `------------------------------------\n`;
+  });
+  downloadTextFile(`AnswerReview_${d.examCode}_${d.studentName}.txt`, out);
+}
+
+// छात्र रिकॉर्ड (पूरी लाइनिंग वाला टेबल)
+async function studentProfile() {
+  let q = await db.collection('attempts').where('studentId', '==', state.student.id).get();
+  let list = q.docs.map(d => d.data()).sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-3xl mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200 flex justify-between items-center">
+        <div>
+          <h3 class="font-black text-lg">मेरा परीक्षा रिकॉर्ड</h3>
+          <p class="text-xs text-slate-500">${esc(state.student.name)} · ${esc(state.student.className)}</p>
+        </div>
+        <button class="border border-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="studentDashboard()">← Dashboard</button>
+      </div>
+
+      <div class="glass-card p-4 border border-slate-200 overflow-x-auto">
+        <table class="table-grid text-xs">
+          <thead>
+            <tr>
+              <th>परीक्षा</th>
+              <th>कोड</th>
+              <th>अंक</th>
+              <th>प्रतिशत</th>
+              <th>समय</th>
+              <th>दिनांक</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map(x => `
+              <tr>
+                <td class="font-bold text-left">${esc(x.examName)}</td>
+                <td>${esc(x.examCode)}</td>
+                <td><b>${x.correct}/${x.total}</b></td>
+                <td class="text-emerald-600 font-bold">${x.percent}%</td>
+                <td>${fmtTime(x.elapsed)}</td>
+                <td class="text-[11px] text-slate-500">${x.createdAt?.toDate?.().toLocaleDateString('hi-IN') || ''}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="py-6 text-slate-400">अभी तक कोई परीक्षा नहीं दी है।</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+function dedupeList(arr) {
+  let map = new Map();
+  for (let item of arr) {
+    let key = (item.code || item.id || '').toString().trim().toUpperCase();
+    if (!map.has(key)) {
+      map.set(key, item);
+    } else {
+      let existing = map.get(key);
+      if ((item.createdAt?.seconds || 0) > (existing.createdAt?.seconds || 0)) {
+        map.set(key, item);
+      }
+    }
+  }
+  return [...map.values()];
+}
+
+async function fetchTeacherData() {
+  let u = auth.currentUser;
+  if (!u) return false;
+  let td = await db.collection('teachers').doc(u.uid).get();
+  let tData = td.data() || {};
+  state.teacher = {
+    id: u.uid,
+    name: tData.name || u.displayName || u.email.split('@')[0],
+    email: u.email,
+    photoUrl: tData.photoUrl || ''
+  };
+
+  let snap = await db.collection('exams').get();
+  let all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  let mine = all.filter(x => !x.deleted && (x.teacherId === u.uid || !x.teacherId || x.teacherName === state.teacher.name));
+  state.exams = dedupeList(mine);
+  return true;
+}
+
+async function teacherDashboard() {
+  let ok = await fetchTeacherData();
+  if (!ok) return showHome();
+
+  let attSnap = await db.collection('attempts').get();
+  let totalRecords = attSnap.size;
+
+  $('app').innerHTML = `
+    ${renderTopBar(`
+      <button class="bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-full" onclick="teacherDashboard()">डैशबोर्ड</button>
+      <button class="bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded-full" onclick="showHome()">Student Portal</button>
+    `)}
+
+    <main class="max-w-md mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex items-center gap-4">
+          <div class="w-16 h-16 rounded-full overflow-hidden border-2 border-indigo-500 shadow flex items-center justify-center bg-slate-100">
+            ${state.teacher.photoUrl 
+              ? `<img src="${esc(state.teacher.photoUrl)}" class="w-full h-full object-cover">`
+              : `<span class="text-2xl font-black text-indigo-600">${esc((state.teacher.name || 'T').charAt(0).toUpperCase())}</span>`}
+          </div>
+          <div>
+            <h2 class="text-xl font-black text-slate-800">${esc(state.teacher.name)}</h2>
+            <p class="text-xs text-slate-500 mt-0.5">डैशबोर्ड से परीक्षा और परिणाम मैनेज करें</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 mt-5">
+          <button class="pill-btn bg-rose-600 hover:bg-rose-700 text-white text-xs" onclick="teacherMessages()">
+            💬 छात्र सवाल व कमेंट्स
+          </button>
+          <button class="pill-btn bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs border border-rose-200" onclick="recycleBinView()">
+            🗑️ रीसायकल बिन
+          </button>
+          <button class="pill-btn bg-slate-800 hover:bg-slate-900 text-white text-xs" onclick="teacherProfileView()">
+            👤 प्रोफाइल व फोटो
+          </button>
+          <button class="pill-btn bg-indigo-600 hover:bg-indigo-700 text-white text-xs" onclick="createExamView()">
+            + Create Exam
+          </button>
+          <button class="pill-btn bg-amber-500 hover:bg-amber-600 text-white text-xs" onclick="teacherMeritView()">
+            🏆 Merit List
+          </button>
+          <button class="pill-btn bg-slate-800 hover:bg-slate-900 text-white text-xs" onclick="teacherStudentsView()">
+            👥 Students
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="glass-card p-4 border border-slate-200">
+          <div class="text-xs font-bold text-slate-500 flex items-center gap-1">Active Exams <span>👉</span></div>
+          <div class="text-3xl font-black text-indigo-700 mt-1">${state.exams.length}</div>
+        </div>
+        <div class="glass-card p-4 border border-slate-200">
+          <div class="text-xs font-bold text-slate-500 flex items-center gap-1">Total Records <span>👉</span></div>
+          <div class="text-3xl font-black text-emerald-600 mt-1">${totalRecords}</div>
+        </div>
+      </div>
+
+      <!-- मेरी परीक्षाएं बॉक्स -->
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-black text-base text-slate-800">My Exams (मेरी परीक्षाएं - <span id="myExamCount">${state.exams.length}</span>)</h3>
+          <button class="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-1 rounded-lg hover:bg-rose-100" onclick="cleanupAllDuplicates()">
+            🧹 34 डुप्लीकेट हटाएं
+          </button>
+        </div>
+        
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <div class="flex items-center gap-1 text-xs font-bold text-slate-600">
+            <span>वर्ग:</span>
+            <select id="filterClass" onchange="renderMyExams()" class="border border-slate-300 rounded-xl px-2.5 py-1 text-xs outline-none">
+              <option value="">सभी वर्ग</option>
+              <option value="Class 6">Class 6</option>
+              <option value="Class 7">Class 7</option>
+              <option value="Class 8">Class 8</option>
+              <option value="Class 9">Class 9</option>
+              <option value="Class 10">Class 10</option>
+              <option value="Class 11">Class 11</option>
+              <option value="Class 12">Class 12</option>
+            </select>
+          </div>
+          <button id="sortBtnNew" class="bg-indigo-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl" onclick="toggleSort('new')">A-Z (नई पहले)</button>
+          <button id="sortBtnOld" class="bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-xl border" onclick="toggleSort('old')">Z-A (पुरानी पहले)</button>
+        </div>
+
+        <div class="space-y-2 mb-4">
+          <div class="relative">
+            <input id="myExamSearch" oninput="renderMyExams()" class="w-full search-input py-2.5 pl-8 pr-3 text-xs" placeholder="🔎 परीक्षा का नाम या कोड खोजें...">
+            <span class="absolute left-2.5 top-2.5 text-slate-400 text-xs">🔍</span>
+          </div>
+          <div class="relative">
+            <input id="mySubjectSearch" oninput="renderMyExams()" class="w-full search-input py-2 pl-8 pr-3 text-xs" placeholder="📚 विषय खोजें (उदा. Science, रसायन शास्त्र, Math)...">
+            <span class="absolute left-2.5 top-2 text-slate-400 text-xs">📖</span>
+          </div>
+        </div>
+
+        <!-- परीक्षा कार्ड्स की लिस्ट -->
+        <div id="myExamListContainer" class="space-y-4"></div>
+      </div>
+    </main>
+  `;
+
+  renderMyExams();
+}
+
+function toggleSort(type) {
+  state.sortOrder = type;
+  if (type === 'new') {
+    $('sortBtnNew').className = "bg-indigo-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl";
+    $('sortBtnOld').className = "bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-xl border";
+  } else {
+    $('sortBtnOld').className = "bg-indigo-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl";
+    $('sortBtnNew').className = "bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-xl border";
+  }
+  renderMyExams();
+}
+
+// कार्ड में नाम, विषय, कोड, प्रश्न संख्या व सभी एक्शन बटन (स्क्रीनशॉट जैसा)
+function renderMyExams() {
+  let list = dedupeList([...state.exams]);
+  let q = ($('myExamSearch')?.value || '').toLowerCase().trim();
+  let subQ = ($('mySubjectSearch')?.value || '').toLowerCase().trim();
+  let cl = $('filterClass')?.value || '';
+
+  if (cl) {
+    list = list.filter(x => (x.classes || []).includes(cl) || x.className === cl);
+  }
+
+  if (q) {
+    list = list.filter(x => ((x.name || '') + ' ' + (x.code || '')).toLowerCase().includes(q));
+  }
+
+  if (subQ) {
+    list = list.filter(x => (x.subject || '').toLowerCase().includes(subQ));
+  }
+
+  if (state.sortOrder === 'new') {
+    list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  } else {
+    list.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+  }
+
+  if ($('myExamCount'))$('myExamCount').textContent = list.length;
+  let box = $('myExamListContainer');
+  if (!box) return;
+
+  if (list.length === 0) {
+    box.innerHTML = `<div class="text-center py-8 text-xs text-slate-400 font-bold">कोई परीक्षा नहीं मिली।</div>`;
+    return;
+  }
+
+  box.innerHTML = list.map(x => `
+    <div class="exam-item-card p-4 bg-white">
+      <div class="flex justify-between items-start">
+        <div>
+          <h4 class="font-black text-slate-800 text-base">${esc(x.name || 'परीक्षा')}</h4>
+          <div class="text-xs text-indigo-700 font-bold mt-1">
+            ${esc((x.classes || []).join(', ') || x.className || 'Class 10')} · विषय: <b>${esc(x.subject || 'सामान्य')}</b>
+          </div>
+        </div>
+        <span class="badge-pub">Published</span>
+      </div>
+
+      <div class="text-xs text-slate-700 mt-2 font-mono bg-slate-50 p-2 rounded-lg border border-slate-100 flex justify-between">
+        <span>Code: <b class="text-indigo-600">${esc(x.code || x.id)}</b></span>
+        <span>Questions: <b>${x.questions?.length || 0}</b></span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-100 text-xs font-bold">
+        <button class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg" onclick="copyExamLink('${x.code}')">
+          Copy Link
+        </button>
+        <button class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg flex items-center gap-1" onclick="editExamForm('${x.id}')">
+          ✏️ Edit
+        </button>
+        <button class="bg-amber-50 hover:bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg flex items-center gap-1" onclick="teacherMeritView('${x.id}')">
+          🏆 Merit List
+        </button>
+        <button class="ml-auto text-rose-600 hover:text-rose-800 flex items-center gap-1 text-xs font-bold py-1.5 px-3 bg-rose-50 rounded-lg border border-rose-100" onclick="deleteExamDirectly('${x.id}', '${x.code}')">
+          🗑️ Delete
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function copyExamLink(code) {
+  let url = window.location.origin + window.location.pathname + '?exam=' + encodeURIComponent(code);
+  navigator.clipboard.writeText(url).then(() => {
+    toast(`परीक्षा कोड ${code} का लिंक कॉपी हो गया!`);
+  }).catch(() => {
+    prompt('यह लिंक कॉपी करें:', url);
+  });
+}
+
+// परीक्षा डिलीट करने का 100% सटीक फंक्शन
+async function deleteExamDirectly(id, code) {
+  if (!confirm(`क्या आप वाकई इस परीक्षा को हमेशा के लिए डिलीट करना चाहते हैं?`)) return;
+
+  toast('डिलीट हो रहा है...');
+  try {
+    let batch = db.batch();
+
+    // ID से रेफरेंस
+    if (id) {
+      batch.delete(db.collection('exams').doc(id));
+    }
+    // Code से रेफरेंस
+    if (code && code !== id) {
+      batch.delete(db.collection('exams').doc(code));
+    }
+
+    // क्वेरी द्वारा ढूंढ़कर हटाना
+    if (code) {
+      let qSnap = await db.collection('exams').where('code', '==', code).get();
+      qSnap.docs.forEach(doc => batch.delete(doc.ref));
+    }
+
+    await batch.commit();
+
+    // लोकल स्टेट से तुरंत गायब करें
+    state.exams = state.exams.filter(x => x.id !== id && x.code !== code);
+    toast('परीक्षा पूरी तरह डिलीट हो गई!');
+    await teacherDashboard();
+  } catch (err) {
+    try {
+      await db.collection('exams').doc(id).update({ deleted: true, published: false });
+      state.exams = state.exams.filter(x => x.id !== id);
+      toast('परीक्षा को हटा दिया गया है।');
+      await teacherDashboard();
+    } catch (e2) {
+      toast('डिलीट करने में त्रुटि: ' + err.message);
+    }
+  }
+}
+
+// 34 डुप्लीकेट परीक्षाओं को एक साथ मिटाने का बटन
+async function cleanupAllDuplicates() {
+  if (!confirm('क्या आप डेटाबेस में मौजूद सभी डुप्लीकेट परीक्षाओं को पूरी तरह साफ़ करना चाहते हैं?')) return;
+  toast('डुप्लीकेट्स साफ़ किए जा रहे हैं...');
+
+  try {
+    let snap = await db.collection('exams').get();
+    let groups = {};
+    snap.docs.forEach(d => {
+      let x = d.data();
+      let k = (x.code || x.name || d.id).trim().toUpperCase();
+      (groups[k] ??= []).push({ id: d.id, ...x });
+    });
+
+    let count = 0;
+    let batch = db.batch();
+    for (let k in groups) {
+      let arr = groups[k];
+      if (arr.length > 1) {
+        arr.sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+        for (let i = 1; i < arr.length; i++) {
+          batch.delete(db.collection('exams').doc(arr[i].id));
+          count++;
+        }
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+      toast(`${count} डुप्लीकेट परीक्षाएं हटा दी गईं!`);
+    } else {
+      toast('कोई डुप्लीकेट परीक्षा नहीं मिली।');
+    }
+    await teacherDashboard();
+  } catch (e) {
+    toast('डुप्लीकेट साफ़ करने में त्रुटि: ' + e.message);
+  }
+}
+function createExamView(existing = null) {
+  state.editingExam = existing;
+  let ex = existing || {};
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-xl mx-auto p-4 space-y-4">
+      <div class="glass-card p-4 border border-slate-200 flex justify-between items-center">
+        <div class="font-black text-base text-slate-800 flex items-center gap-2">
+          🚀 <span>नई परीक्षा बनाएँ</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="teacherDashboard()">
+            ← Dashboard
+          </button>
+          <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-1.5 rounded-xl shadow" onclick="publishExamNow()">
+            Publish Exam
+          </button>
+        </div>
+      </div>
+
+      <div class="glass-card p-5 border border-slate-200 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Exam Name</label>
+          <input id="ce_name" value="${esc(ex.name || '')}" class="w-full search-input p-3 text-sm" placeholder="परीक्षा का नाम लिखें">
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Exam Code</label>
+          <input id="ce_code" value="${esc(ex.code || '')}" class="w-full search-input p-3 text-sm font-mono font-bold" placeholder="उदा. SC1, EXAM4">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Class</label>
+            <select id="ce_class" class="w-full search-input p-3 text-sm">
+              ${['Class 6','Class 7','Class 8','Class 9','Class 10','Class 11','Class 12'].map(c => 
+                `<option value="${c}" ${(ex.classes?.includes(c) \vert{}\vert{} ex.className === c) ? 'selected' : ''}>${c}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Subject (विषय)</label>
+            <input id="ce_subject" value="${esc(ex.subject || '')}" class="w-full search-input p-3 text-sm" placeholder="उदा. रसायन शास्त्र, भौतिकी">
+          </div>
+        </div>
+
+        <div class="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4">
+          <div class="font-bold text-xs text-indigo-900 flex items-center gap-1 mb-1">
+            ⚡ <span>एक साथ प्रश्न पेस्ट करें (1. प्रश्न (A) विकल्प (B) विकल्प... उत्तर: A)</span>
+          </div>
+          <textarea id="ce_bulk" rows="5" class="w-full bg-white border border-indigo-200 rounded-xl p-3 text-xs font-mono outline-none mt-2" placeholder="1. प्रश्न यहाँ लिखें...&#10;(A) विकल्प A&#10;(B) विकल्प B&#10;(C) विकल्प C&#10;(D) विकल्प D&#10;उत्तर: A"></textarea>
+          <button class="pill-btn bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold mt-2.5 py-2 px-4" onclick="loadBulkQuestions()">
+            ⚡ प्रश्न लोड करें
+          </button>
+        </div>
+
+        <div class="flex justify-between items-center pt-2">
+          <h4 class="font-black text-sm text-slate-800">प्रश्न सूची (<span id="qCountDisplay">0</span>)</h4>
+          <button class="bg-purple-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl" onclick="addNewManualQuestion()">+ एक प्रश्न जोड़ें</button>
+        </div>
+
+        <div id="questionListEditor" class="space-y-4"></div>
+
+        <button class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-xl shadow mt-4 text-sm" onclick="publishExamNow()">
+          💾 परीक्षा सुरक्षित व प्रकाशित करें (Publish)
+        </button>
+      </div>
+    </main>
+  `;
+
+  state.tempQuestions = (ex.questions && ex.questions.length) ? JSON.parse(JSON.stringify(ex.questions)) : [];
+  renderQuestionEditor();
+}
+
+function loadBulkQuestions() {
+  let text = $('ce_bulk').value.trim();
+  if (!text) return toast('कृपया टेक्स्ट बॉक्स में प्रश्न लिखें!');
+  let lines = text.split(/\n\s*\n|\n(?=\d+[\.\)])/);
+  let parsed = [];
+
+  for (let block of lines) {
+    block = block.trim();
+    if (!block) continue;
+
+    if (block.includes('|')) {
+      let parts = block.split('|').map(p => p.trim());
+      if (parts.length >= 6) {
+        let ansChar = parts[5].replace(/^(उत्तर|ans|answer)[:\s-]*/i, '').trim().toUpperCase().charAt(0) || 'A';
+        parsed.push({
+          text: parts[0].replace(/^\d+[\.\)]\s*/, ''),
+          options: [parts[1], parts[2], parts[3], parts[4]],
+          answer: Math.max(0, 'ABCD'.indexOf(ansChar)),
+          horizontal: true
+        });
+        continue;
+      }
+    }
+
+    let qMatch = block.match(/^(?:(?:\d+[\.\)]\s*)?)([\s\S]+?)(?=\s*\(?[A-Da-d]\))/);
+    let optA = block.match(/\(?[Aa]\)[\.\s]*([\s\S]+?)(?=\s*\(?[Bb]\))/);
+    let optB = block.match(/\(?[Bb]\)[\.\s]*([\s\S]+?)(?=\s*\(?[Cc]\))/);
+    let optC = block.match(/\(?[Cc]\)[\.\s]*([\s\S]+?)(?=\s*\(?[Dd]\))/);
+    let optD = block.match(/\(?[Dd]\)[\.\s]*([\s\S]+?)(?=\s*(?:उत्तर|Answer|Ans)\s*[:\-\=]|\s*$)/i);
+    let ansMatch = block.match(/(?:उत्तर|Answer|Ans)\s*[:\-\=]\s*\(?([A-Da-d])\)?/i);
+
+    if (qMatch && optA && optB && optC && optD) {
+      let ansChar = ansMatch ? ansMatch[1].toUpperCase() : 'A';
+      parsed.push({
+        text: qMatch[1].trim(),
+        options: [optA[1].trim(), optB[1].trim(), optC[1].trim(), optD[1].trim()],
+        answer: Math.max(0, 'ABCD'.indexOf(ansChar)),
+        horizontal: true
+      });
+    }
+  }
+
+  if (parsed.length === 0) {
+    return toast('प्रश्नों का प्रारूप सही नहीं है।');
+  }
+
+  state.tempQuestions = state.tempQuestions.concat(parsed);
+  $('ce_bulk').value = '';
+  renderQuestionEditor();
+  toast(`${parsed.length} प्रश्न लोड हो गए!`);
+}
+
+function addNewManualQuestion() {
+  state.tempQuestions.push({
+    text: '',
+    options: ['', '', '', ''],
+    answer: 0,
+    horizontal: true
+  });
+  renderQuestionEditor();
+}
+
+function renderQuestionEditor() {
+  $('qCountDisplay').textContent = state.tempQuestions.length;
+  let box = $('questionListEditor');
+  if (!box) return;
+
+  box.innerHTML = state.tempQuestions.map((q, i) => `
+    <div class="border border-slate-200 rounded-2xl p-4 bg-slate-50 relative">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs font-black text-indigo-700">प्रश्न संख्या ${i + 1}</span>
+        <button class="text-xs font-bold text-rose-600 hover:text-rose-800" onclick="state.tempQuestions.splice(${i},1);renderQuestionEditor()">🗑️ हटाएं</button>
+      </div>
+
+      <textarea class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs outline-none" rows="2" placeholder="प्रश्न यहाँ लिखें..." oninput="state.tempQuestions[${i}].text=this.value">${esc(q.text)}</textarea>
+
+      <div class="grid grid-cols-2 gap-2 mt-2">
+        ${['A','B','C','D'].map((ltr, j) => `
+          <div class="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs">
+            <span class="font-bold text-slate-500 mr-1">(${ltr})</span>
+            <input class="w-full outline-none text-xs" value="${esc(q.options[j] \vert{}\vert{} '')}" placeholder="विकल्प ${ltr}" oninput="state.tempQuestions[${i}].options[${j}]=this.value">
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- क्षितिज (Horizontal) और ऊर्ध्वाधर (Vertical) चयन प्रणाली -->
+      <div class="flex flex-wrap items-center justify-between gap-2 mt-3 pt-2 border-t border-slate-200 text-xs">
+        <div class="flex items-center gap-1 font-bold text-slate-700">
+          <span>सही उत्तर:</span>
+          <select class="border border-slate-300 rounded-lg p-1 bg-white" onchange="state.tempQuestions[${i}].answer=parseInt(this.value)">
+            ${['A','B','C','D'].map((a, j) => `<option value="${j}" ${q.answer === j ? 'selected' : ''}>विकल्प (${a})</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+            <input type="radio" name="layout_${i}" ${q.horizontal ? 'checked' : ''} onchange="state.tempQuestions[${i}].horizontal=true">
+            <span>क्षितिज (Horizontal)</span>
+          </label>
+          <label class="flex items-center gap-1 cursor-pointer font-semibold text-slate-700">
+            <input type="radio" name="layout_${i}" ${!q.horizontal ? 'checked' : ''} onchange="state.tempQuestions[${i}].horizontal=false">
+            <span>ऊर्ध्वाधर (Vertical)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function publishExamNow() {
+  let name = $('ce_name').value.trim();
+  let code = $('ce_code').value.trim().toUpperCase();
+  let cls = $('ce_class').value;
+  let subject = $('ce_subject').value.trim();
+
+  if (!name || !code) return toast('परीक्षा का नाम और कोड अनिवार्य है!');
+  if (!state.tempQuestions.length) return toast('कम से कम 1 प्रश्न जोड़ना अनिवार्य है!');
+
+  let data = {
+    name,
+    code,
+    classes: [cls],
+    className: cls,
+    subject: subject || 'सामान्य',
+    questions: state.tempQuestions,
+    published: true,
+    deleted: false,
+    teacherId: auth.currentUser.uid,
+    teacherName: state.teacher.name,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  try {
+    let docId = state.editingExam ? state.editingExam.id : code;
+    await db.collection('exams').doc(docId).set({
+      ...data,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    toast('परीक्षा सफलतापूर्वक प्रकाशित (Publish) हो गई!');
+    await teacherDashboard();
+  } catch (err) {
+    toast('Error: ' + err.message);
+  }
+}
+
+function editExamForm(id) {
+  let ex = state.exams.find(e => e.id === id);
+  if (ex) createExamView(ex);
+}
+// मेरिट लिस्ट (पूरी तरह लाइनिंग वाला टेबल)
+async function teacherMeritView(filterExamId = '') {
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-4xl mx-auto p-4 space-y-4">
+      <div class="glass-card p-4 border border-slate-200 flex justify-between items-center">
+        <div>
+          <h3 class="font-black text-lg text-slate-800">मेरिट लिस्ट व परिणाम</h3>
+          <p class="text-xs text-slate-500">सभी विद्यार्थियों का प्रदर्शन व रैंक</p>
+        </div>
+        <div class="flex gap-2">
+          <button class="border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="teacherDashboard()">
+            ← Dashboard
+          </button>
+          <button class="bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1" onclick="downloadMeritCSV()">
+            📥 CSV फाइल डाउनलोड
+          </button>
+        </div>
+      </div>
+
+      <div class="glass-card p-4 border border-slate-200">
+        <div class="flex flex-wrap gap-3 mb-4">
+          <select id="selMeritExam" onchange="loadMeritData()" class="border border-slate-300 rounded-xl p-2 text-xs font-bold outline-none">
+            <option value="">सभी परीक्षाएं (All Exams)</option>
+            ${state.exams.map(e => `<option value="${e.id}" ${filterExamId === e.id ? 'selected' : ''}>${esc(e.name)} (${esc(e.code)})</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="table-grid text-xs">
+            <thead>
+              <tr>
+                <th style="width: 50px;">क्र.</th>
+                <th>नाम</th>
+                <th>वर्ग</th>
+                <th>हल किए</th>
+                <th>जाँचे गए</th>
+                <th class="text-emerald-700">सही</th>
+                <th class="text-rose-700">गलत</th>
+                <th>अंक</th>
+                <th style="width: 140px;">कार्यवाई</th>
+              </tr>
+            </thead>
+            <tbody id="meritTableBody">
+              <tr><td colspan="9" class="py-6 text-slate-400">डेटा लोड हो रहा है...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  `;
+
+  loadMeritData();
+}
+
+async function loadMeritData() {
+  let examId = $('selMeritExam')?.value || '';
+  let snap = await db.collection('attempts').get();
+  let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  if (examId) {
+    list = list.filter(x => x.examId === examId);
+  }
+
+  list.sort((a, b) => (b.correct || 0) - (a.correct || 0));
+
+  let tbody = $('meritTableBody');
+  if (!tbody) return;
+
+  if (list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-slate-400 font-bold">अभी कोई परिणाम उपलब्ध नहीं है।</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map((x, i) => `
+    <tr>
+      <td class="font-bold text-slate-600">${i + 1}</td>
+      <td class="font-black text-slate-800 text-left pl-3">${esc(x.studentName || 'Student')}</td>
+      <td class="text-slate-500">${esc(x.className || '-')}</td>
+      <td class="font-bold">${x.attempted || x.total || 0}</td>
+      <td class="font-bold">${x.total || 0}</td>
+      <td class="font-black text-emerald-600 text-sm">${x.correct || 0}</td>
+      <td class="font-black text-rose-600 text-sm">${x.wrong != null ? x.wrong : (x.total - x.correct)}</td>
+      <td class="font-black text-indigo-700 text-sm">${x.correct || 0}</td>
+      <td>
+        <div class="flex items-center justify-center gap-1">
+          <button class="bg-indigo-600 text-white px-2.5 py-1 rounded font-bold text-[11px]" onclick="viewStudentFullDetail('${x.id}')">View</button>
+          <button class="bg-rose-600 text-white px-2 py-1 rounded font-bold text-[11px]" onclick="deleteAttemptRecord('${x.id}')">हटाएं</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// स्टूडेंट लिस्ट (पूरी लाइनिंग वाला टेबल)
+async function teacherStudentsView() {
+  let snap = await db.collection('students').get();
+  let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-4xl mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="font-black text-lg text-slate-800">Student Accounts (छात्र सूची)</h3>
+            <p class="text-xs text-slate-500">सभी पंजीकृत विद्यार्थियों का विवरण</p>
+          </div>
+          <button class="border border-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="teacherDashboard()">← Dashboard</button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="table-grid text-xs">
+            <thead>
+              <tr>
+                <th>नाम</th>
+                <th>Username</th>
+                <th>Class</th>
+                <th>पंजीकरण तिथि</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map(s => `
+                <tr>
+                  <td class="font-bold text-left pl-3">${esc(s.name)}</td>
+                  <td class="font-mono">${esc(s.username)}</td>
+                  <td>${esc(s.className)}</td>
+                  <td class="text-slate-500">${s.createdAt?.toDate?.().toLocaleDateString('hi-IN') || '-'}</td>
+                  <td>
+                    <button class="bg-amber-500 text-white font-bold px-2.5 py-1 rounded text-[11px]" onclick="resetStudentPasswordByTeacher('${s.id}')">पासवर्ड बदलें</button>
+                  </td>
+                </tr>
+              `).join('') || '<tr><td colspan="5" class="py-6 text-slate-400">कोई छात्र पंजीकृत नहीं है।</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function resetStudentPasswordByTeacher(id) {
+  let np = prompt('नया पासवर्ड दर्ज करें:');
+  if (!np) return;
+  await db.collection('students').doc(id).update({ passwordHash: await hash(np) });
+  toast('पासवर्ड बदल दिया गया!');
+}
+
+async function viewStudentFullDetail(attId) {
+  let d = (await db.collection('attempts').doc(attId).get()).data();
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-2xl mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-xl font-black text-slate-800">${esc(d.studentName)} का संपूर्ण विवरण</h3>
+            <p class="text-xs text-slate-500">परीक्षा: ${esc(d.examName)} (${esc(d.examCode)})</p>
+          </div>
+          <button class="border border-slate-300 px-3 py-1.5 rounded-xl font-bold text-xs" onclick="teacherMeritView('${d.examId}')">← Back</button>
+        </div>
+
+        <div class="grid grid-cols-4 gap-2 text-center my-4">
+          <div class="bg-slate-100 p-2.5 rounded-xl"><b>${d.correct}/${d.total}</b><div class="text-[10px] text-slate-500">अंक</div></div>
+          <div class="bg-slate-100 p-2.5 rounded-xl"><b>${d.percent}%</b><div class="text-[10px] text-slate-500">प्रतिशत</div></div>
+          <div class="bg-slate-100 p-2.5 rounded-xl"><b>${d.attempted}</b><div class="text-[10px] text-slate-500">हल किए</div></div>
+          <div class="bg-slate-100 p-2.5 rounded-xl"><b>${fmtTime(d.elapsed)}</b><div class="text-[10px] text-slate-500">समय</div></div>
+        </div>
+
+        <div class="space-y-3 mt-4">
+          <h4 class="font-black text-sm text-slate-700">प्रश्नों की समीक्षा:</h4>
+          ${d.questionSnapshot.map((q, i) => {
+            let given = d.answers[i];
+            let isCorrect = given === q.answer;
+            return `
+              <div class="border ${isCorrect ? 'border-emerald-200 bg-emerald-50/30' : 'border-rose-200 bg-rose-50/30'} p-3 rounded-xl text-xs">
+                <div class="font-bold text-slate-800">Q${i + 1}.${esc(q.text)}</div>
+                <div class="mt-1.5 flex justify-between">
+                  <span>विद्यार्थी का उत्तर: <b>${given != null ? String.fromCharCode(65 + given) + '. ' + esc(q.options[given]) : 'नहीं दिया'}</b></span>
+                  <span class="${isCorrect ? 'text-emerald-700' : 'text-rose-700'} font-black">${isCorrect ? '✓ सही' : '✗ गलत'}</span>
+                </div>
+                <div class="text-slate-500 mt-0.5">सही उत्तर: <b>${String.fromCharCode(65 + q.answer)}.${esc(q.options[q.answer])}</b></div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function deleteAttemptRecord(id) {
+  if (!confirm('इस विद्यार्थी का रिकॉर्ड हटाना चाहते हैं?')) return;
+  await db.collection('attempts').doc(id).delete();
+  toast('रिकॉर्ड हटा दिया गया।');
+  loadMeritData();
+}
+
+function downloadMeritCSV() {
+  let rows = [...document.querySelectorAll('#meritTableBody tr')];
+  if (!rows.length) return toast('डाउनलोड के लिए कोई डेटा नहीं है!');
+  let csv = 'क्र,नाम,वर्ग,हल किए,जाँचे गए,सही,गलत,अंक\n';
+  rows.forEach(r => {
+    let cols = [...r.children].slice(0, 8).map(c => `"${c.innerText.trim().replace(/"/g, '""')}"`);
+    csv += cols.join(',') + '\n';
+  });
+  downloadTextFile('Merit_List_Report.csv', csv);
+}
+
+// शिक्षक प्रोफाइल - कोई डिफ़ॉल्ट नाम/पासवर्ड नहीं
+function teacherProfileView() {
+  let t = state.teacher;
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-md mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <div class="flex items-center gap-2">
+            <span class="text-indigo-600 text-lg">👤</span>
+            <div>
+              <h3 class="font-black text-base text-slate-800">शिक्षक प्रोफाइल</h3>
+              <p class="text-[11px] text-slate-400">फोटो, नाम व लॉगिन पासवर्ड बदलें</p>
+            </div>
+          </div>
+          <button class="border border-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-slate-50" onclick="teacherDashboard()">
+            ← Dashboard
+          </button>
+        </div>
+
+        <div class="border border-slate-200 rounded-2xl p-4 bg-slate-50 flex items-center gap-4">
+          <div class="w-16 h-16 rounded-full overflow-hidden border-2 border-indigo-500 shadow flex items-center justify-center bg-white">
+            ${t.photoUrl 
+              ? `<img src="${esc(t.photoUrl)}" class="w-full h-full object-cover">`
+              : `<span class="text-2xl font-black text-indigo-600">${esc((t.name || 'T').charAt(0).toUpperCase())}</span>`}
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs font-bold text-slate-700 mb-1">शिक्षक प्रोफाइल फोटो (Gallery)</label>
+            <input type="file" id="tPhotoFile" accept="image/*" class="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 cursor-pointer">
+          </div>
+        </div>
+
+        <div class="space-y-3 mt-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">पंजीकृत ईमेल</label>
+            <input value="${esc(t.email || '')}" disabled class="w-full search-input p-3 text-xs bg-slate-100 text-slate-500 cursor-not-allowed">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">शिक्षक का नाम (Username) *</label>
+            <input id="tp_name" value="${esc(t.name || '')}" class="w-full search-input p-3 text-sm font-bold text-indigo-900" placeholder="अपना नाम दर्ज करें">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">नया पासवर्ड (New Password)</label>
+            <input id="tp_newpass" type="text" class="w-full search-input p-3 text-sm font-mono" placeholder="नया पासवर्ड दर्ज करें (खाली छोड़ें तो वही रहेगा)">
+          </div>
+
+          <button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-3 rounded-2xl shadow mt-2 text-sm" onclick="saveTeacherProfileData()">
+            💾 बदलाव सुरक्षित करें (Save Profile)
+          </button>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function saveTeacherProfileData() {
+  let name = $('tp_name').value.trim();
+  let newPass = $('tp_newpass').value.trim();
+  let file = $('tPhotoFile')?.files[0];
+
+  if (!name) return toast('कृपया शिक्षक का नाम अवश्य भरें!');
+
+  let photoUrl = state.teacher.photoUrl || '';
+  if (file) {
+    try {
+      toast('फोटो अपलोड हो रही है...');
+      let ref = storage.ref(`teacher-photos/${auth.currentUser.uid}/${Date.now()}_${file.name}`);
+      await ref.put(file);
+      photoUrl = await ref.getDownloadURL();
+    } catch (err) {
+      console.warn('Storage error:', err);
+    }
+  }
+
+  if (newPass) {
+    if (newPass.length < 6) return toast('पासवर्ड कम से कम 6 अक्षरों का होना चाहिए!');
+    try {
+      await auth.currentUser.updatePassword(newPass);
+      toast('पासवर्ड बदल गया!');
+    } catch (e) {
+      toast('पासवर्ड बदलने में त्रुटि: ' + e.message);
+    }
+  }
+
+  await db.collection('teachers').doc(auth.currentUser.uid).set({
+    name: name,
+    photoUrl: photoUrl,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+
+  state.teacher.name = name;
+  state.teacher.photoUrl = photoUrl;
+  toast('प्रोफाइल सुरक्षित हो गई!');
+  teacherDashboard();
+}
+
+async function recycleBinView() {
+  let snap = await db.collection('exams').where('teacherId', '==', auth.currentUser.uid).where('deleted', '==', true).get();
+  let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-md mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-black text-base text-slate-800">🗑️ रीसायकल बिन</h3>
+          <button class="border border-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="teacherDashboard()">← Back</button>
+        </div>
+        <div class="space-y-3">
+          ${list.map(x => `
+            <div class="border border-slate-200 rounded-xl p-3 flex justify-between items-center">
+              <div>
+                <div class="font-bold text-xs">${esc(x.name)}</div>
+                <div class="text-[10px] text-slate-400">Code: ${esc(x.code)}</div>
+              </div>
+              <button class="bg-emerald-600 text-white text-xs font-bold px-3 py-1 rounded-lg" onclick="restoreExam('${x.id}')">वापस लाएं</button>
+            </div>
+          `).join('') || '<p class="text-center text-xs text-slate-400 py-6">रीसायकल बिन खाली है।</p>'}
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function restoreExam(id) {
+  await db.collection('exams').doc(id).update({ deleted: false, published: true });
+  toast('परीक्षा को वापस ला दिया गया है।');
+  teacherDashboard();
+}
+
+async function teacherMessages() {
+  let snap = await db.collection('students').where('active', '==', true).get();
+  let students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-md mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-black text-base text-slate-800">💬 छात्र सवाल व कमेंट्स</h3>
+          <button class="border border-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl" onclick="teacherDashboard()">← Back</button>
+        </div>
+        <div class="space-y-2">
+          ${students.map(s => `
+            <div class="border border-slate-200 hover:bg-slate-50 p-3 rounded-xl flex justify-between items-center cursor-pointer" onclick="openChatWithStudent('${s.id}', '${esc(s.name)}')">
+              <div>
+                <div class="font-bold text-xs text-slate-800">${esc(s.name)}</div>
+                <div class="text-[10px] text-slate-400">${esc(s.className)} · @${esc(s.username)}</div>
+              </div>
+              <span class="text-indigo-600 font-bold text-xs">बातचीत ➔</span>
+            </div>
+          `).join('') || '<p class="text-center text-xs text-slate-400 py-6">कोई विद्यार्थी उपलब्ध नहीं है।</p>'}
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function openChatWithStudent(stId, stName) {
+  let snap = await db.collection('messages').where('studentId', '==', stId).get();
+  let msgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));
+
+  $('app').innerHTML = `
+    ${renderTopBar()}
+    <main class="max-w-md mx-auto p-4 space-y-4">
+      <div class="glass-card p-5 border border-slate-200">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-black text-sm">${esc(stName)} के साथ चैट</h3>
+          <button class="border px-2.5 py-1 rounded-xl text-xs font-bold" onclick="teacherMessages()">← Back</button>
+        </div>
+        <div class="h-72 overflow-y-auto space-y-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+          ${msgs.map(m => `
+            <div class="flex ${m.sender === 'teacher' ? 'justify-end' : 'justify-start'}">
+              <div class="max-w-[80%] rounded-2xl px-3 py-2 text-xs ${m.sender === 'teacher' ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-800'}">
+                ${esc(m.text)}
+              </div>
+            </div>
+          `).join('') || '<div class="text-center text-xs text-slate-400 py-8">कोई संदेश नहीं है।</div>'}
+        </div>
+        <div class="flex gap-2 mt-3">
+          <input id="chatInputBox" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none" placeholder="संदेश लिखें...">
+          <button class="bg-indigo-600 text-white font-bold text-xs px-4 py-2 rounded-xl" onclick="sendChatMsg('${stId}', '${esc(stName)}')">भेजें</button>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+async function sendChatMsg(stId, stName) {
+  let txt = $('chatInputBox').value.trim();
+  if (!txt) return;
+  await db.collection('messages').add({
+    studentId: stId,
+    teacherId: auth.currentUser.uid,
+    sender: 'teacher',
+    text: txt,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  $('chatInputBox').value = '';
+  openChatWithStudent(stId, stName);
+}
+
+auth.onAuthStateChanged(u => {
+  if (u && state.role === 'teacher') {
+    teacherDashboard();
+  }
+});
+app();
+</script>
+</body>
+</html>
