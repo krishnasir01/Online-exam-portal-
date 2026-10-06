@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Exam Portal</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+<style>
+body{background:#f3f6fb;color:#172033;font-family:system-ui,-apple-system,"Noto Sans Devanagari",sans-serif}.glass{background:#fff;border:1px solid #e5eaf2;border-radius:18px;box-shadow:0 8px 30px #17203312}.btn{border-radius:10px;padding:.65rem .9rem;font-weight:700}.nav{background:#111827;color:white}.hidden{display:none!important}.option{border:1px solid #dbe2ea;border-radius:12px;padding:.75rem;cursor:pointer}.option.sel{border-color:#2563eb;background:#eff6ff}.danger{color:#b91c1c}.timer{font-variant-numeric:tabular-nums}.qcard{scroll-margin-top:100px}.toast{position:fixed;right:16px;bottom:16px;z-index:100;padding:12px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 10px 30px #0003}.tab{white-space:nowrap}.tablewrap{overflow:auto}.prose-mini p{margin:.35rem 0}
+
+/* Smart Exam Portal visual refinements */
+.exam-card{position:relative;overflow:hidden;transition:transform .18s,box-shadow .18s}
+.exam-card:hover{transform:translateY(-2px);box-shadow:0 12px 34px #17203318}
+.exam-accent{height:5px;position:absolute;inset:0 0 auto 0}
+.exam-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
+.exam-meta>div{border:1px solid #e6ebf2;border-radius:12px;padding:.65rem;background:#fafcff}
+.firework{position:relative;height:120px;overflow:hidden}
+.firework span{position:absolute;font-size:28px;animation:boom 1.4s infinite ease-out}
+.firework span:nth-child(1){left:15%;top:55%;animation-delay:.1s}.firework span:nth-child(2){left:32%;top:30%;animation-delay:.4s}
+.firework span:nth-child(3){left:50%;top:55%;animation-delay:.2s}.firework span:nth-child(4){left:68%;top:25%;animation-delay:.55s}
+.firework span:nth-child(5){left:84%;top:58%;animation-delay:.3s}
+@keyframes boom{0%{transform:scale(.2) translateY(20px);opacity:0}25%{opacity:1}75%{transform:scale(1.25) translateY(-12px);opacity:1}100%{transform:scale(.6) translateY(-35px);opacity:0}}
+.sticky-table thead th{position:sticky;top:0;background:#f8fafc;z-index:2}
+.sticky-table td,.sticky-table th{border-bottom:1px solid #e5e7eb;padding:.65rem;white-space:nowrap}
+.q-layout-preview{border:1px dashed #cbd5e1;border-radius:12px;padding:.6rem;background:#f8fafc}
+</style>
+</head>
+<body>
+<div id="toast" class="toast hidden"></div>
+<div id="app"></div>
+<script>
+const firebaseConfig={apiKey:"AIzaSyCNZQE09U86piWrHItnrl6gOj5lp5odCIc",authDomain:"online-smartexam.firebaseapp.com",projectId:"online-smartexam",storageBucket:"online-smartexam.firebasestorage.app",messagingSenderId:"496019627434",appId:"1:496019627434:web:86920fd700a85f1e529fd3",measurementId:"G-DG0KG9N2TL"};
+firebase.initializeApp(firebaseConfig);const auth=firebase.auth(),db=firebase.firestore(),storage=firebase.storage();
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let state={role:'home',student:null,teacher:null,exam:null,answers:{},startedAt:null,timer:null,attempts:[], exams:[]};
+function toast(m){$('toast').textContent=m;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),2800)}
+function app(){ $('app').innerHTML=`<header class="nav sticky top-0 z-40"><div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3"><div><div class="font-black text-xl">Smart Exam Portal</div><div class="text-xs text-slate-300">Online Examination System</div></div><div class="flex gap-2"><button class="btn bg-blue-600" onclick="showHome()">Student Login</button><button class="btn bg-emerald-600" onclick="showTeacherLogin()">Teacher Login</button></div></div></header><main id="main" class="max-w-7xl mx-auto p-4 md:p-6"></main>`;showHome() }
+function showHome(){state.role='home';$('main').innerHTML=`<section class="grid md:grid-cols-2 gap-5 items-stretch"><div class="glass p-6"><h1 class="text-3xl font-black">Student Portal</h1><p class="text-slate-500 mt-1">Username और password से सुरक्षित प्रवेश करें।</p><form onsubmit="studentLogin(event)" class="space-y-3 mt-6"><input id="su" required class="w-full border rounded-xl p-3" placeholder="Username"><input id="sp" required type="password" class="w-full border rounded-xl p-3" placeholder="Password"><button class="btn bg-blue-600 text-white w-full">Login</button></form><div class="grid grid-cols-2 gap-2 mt-3"><button class="btn border" onclick="studentRegister()">Create Account</button><button class="btn border" onclick="recoverStudent()">Forgot Username/Password</button></div></div><div class="glass p-6"><h2 class="text-2xl font-black">How it works</h2><div class="mt-4 space-y-3 text-slate-600"><p>✓ Class 6–12 · Class 11–12 में Arts / Science</p><p>✓ Hindi + English परीक्षा सामग्री</p><p>✓ Exam search, A–Z / Z–A sorting</p><p>✓ Unlimited attempts (teacher setting के अनुसार)</p><p>✓ Result, rank और answer review download</p><p>✓ Teacher–student messaging</p></div></div></section>`}
+async function hash(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+async function studentRegister(){let name=prompt('Student का पूरा नाम');if(!name)return;let cls=prompt('वर्ग चुनें: 6, 7, 8, 9, 10, 11-Arts, 11-Science, 12-Arts या 12-Science','12-Science');if(!cls)return;let u=prompt('Unique Username');if(!u)return;let p=prompt('Password');if(!p)return;let q=await db.collection('students').where('username','==',u.trim().toLowerCase()).limit(1).get();if(!q.empty)return toast('यह username पहले से मौजूद है। दूसरा username चुनें।');let ph=await hash(p);await db.collection('students').add({name,username:u.trim().toLowerCase(),passwordHash:ph,className:cls,createdAt:firebase.firestore.FieldValue.serverTimestamp(),active:true});toast('Student account बन गया।');showHome()}
+async function studentLogin(e){e.preventDefault();let u=$('su').value.trim().toLowerCase(),p=$('sp').value;let q=await db.collection('students').where('username','==',u).where('active','==',true).limit(1).get();if(q.empty)return toast('गलत username या password');let d=q.docs[0],x=d.data();if(await hash(p)!==x.passwordHash)return toast('गलत username या password');state.student={id:d.id,...x};studentDashboard()}
+async function recoverStudent(){let mode=prompt('1 = Username याद है, 2 = Password याद है, 3 = दोनों भूल गए');if(mode==='1'){let u=prompt('Username');let q=await db.collection('students').where('username','==',u.trim().toLowerCase()).limit(1).get();if(q.empty)return toast('Username नहीं मिला');toast('Account मिला। सुरक्षा के लिए पुराना password दिखाने के बजाय reset password करें।');return resetStudent(q.docs[0].id)}if(mode==='2'){let p=prompt('Password');let ph=await hash(p),q=await db.collection('students').where('passwordHash','==',ph).limit(1).get();if(q.empty)return toast('Password से कोई account नहीं मिला');toast('Username: '+q.docs[0].data().username);return}if(mode==='3'){let n=prompt('नाम'),c=prompt('वर्ग: 6 / 7 / 8 / 9 / 10 / 11-Arts / 11-Science / 12-Arts / 12-Science');let q=await db.collection('students').where('name','==',n).where('className','==',c).limit(2).get();if(q.empty)return toast('रिकॉर्ड नहीं मिला');toast('Username: '+q.docs[0].data().username+' | Password सुरक्षा कारणों से नहीं दिखाया जाता।');}}
+async function resetStudent(id){let p=prompt('नया password');if(!p)return;await db.collection('students').doc(id).update({passwordHash:await hash(p)});toast('Password reset हो गया।')}
+async function studentDashboard(){let exams=await loadExamsForClass(state.student.className);state.exams=exams;$('main').innerHTML=`<div class="flex flex-wrap justify-between items-center gap-3 mb-5"><div><h1 class="text-2xl font-black">${esc(state.student.name)}</h1><p class="text-slate-500">${esc(state.student.className)} · @${esc(state.student.username)}</p></div><div class="flex flex-wrap gap-2"><button class="btn border" onclick="studentProfile()">मेरा विवरण</button><button class="btn border" onclick="studentEditProfile()">Edit Profile</button><button class="btn border" onclick="downloadStudentHistory()">📥 Download</button><button class="btn border" onclick="studentMessages()">💬 Chat</button><button class="btn border" onclick="changeStudentCredentials()">Username/Password</button><button class="btn bg-red-600 text-white" onclick="auth.signOut();showHome()">Logout</button></div></div><section class="glass p-5 mb-5"><div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3"><label class="font-bold">वर्ग<select id="classFilter" onchange="reloadStudentExams()" class="w-full border rounded-xl p-3 mt-1">${['6','7','8','9','10','11-Arts','11-Science','12-Arts','12-Science'].map(c=>`<option>${c}</option>`).join('')}</select></label><label class="font-bold">Subject<input id="subjectSearch" oninput="renderExamCards()" class="w-full border rounded-xl p-3 mt-1" placeholder="Subject"></label><label class="font-bold">Exam / Code<input id="examSearch" oninput="renderExamCards()" class="w-full border rounded-xl p-3 mt-1" placeholder="Search"></label><label class="font-bold">Chapter<input id="chapterSearch" oninput="renderExamCards()" class="w-full border rounded-xl p-3 mt-1" placeholder="Chapter"></label><label class="font-bold">Teacher<input id="teacherSearch" oninput="renderExamCards()" class="w-full border rounded-xl p-3 mt-1" placeholder="Teacher"></label><label class="font-bold">Sort<select id="sortFilter" onchange="renderExamCards()" class="w-full border rounded-xl p-3 mt-1"><option value="desc">नवीन पहले</option><option value="asc">पुराना पहले</option><option value="az">A–Z</option><option value="za">Z–A</option></select></label></div></section><div id="examCards" class="grid md:grid-cols-2 lg:grid-cols-3 gap-4"></div>`;$('classFilter').value=state.student.className;renderExamCards()}
+async function loadExamsForClass(c){
+  let q=await db.collection('exams').where('classes','array-contains',c).where('published','==',true).get(),m=new Map();
+  q.docs.forEach(d=>{let x={id:d.id,...d.data()},k=(x.code||d.id).toUpperCase(),old=m.get(k),ts=x.updatedAt?.seconds||x.createdAt?.seconds||0,ots=old?.updatedAt?.seconds||old?.createdAt?.seconds||0;if(!old||ts>=ots)m.set(k,x)});
+  return [...m.values()];
+}
+function renderExamCards(){
+  let a=[...state.exams],s=($('examSearch')?.value||'').toLowerCase(),sub=($('subjectSearch')?.value||'').toLowerCase(),ch=($('chapterSearch')?.value||'').toLowerCase(),teach=($('teacherSearch')?.value||'').toLowerCase();
+  a=a.filter(x=>{let hay=[x.name,x.code,x.subject,x.chapter,x.teacherName,x.institute,(x.classes||[]).join(' ')].join(' ').toLowerCase();return (!s||hay.includes(s))&&(!sub||(x.subject||'').toLowerCase().includes(sub))&&(!ch||(x.chapter||'').toLowerCase().includes(ch))&&(!teach||(x.teacherName||'').toLowerCase().includes(teach))});
+  let sort=$('sortFilter')?.value||'desc';a.sort((x,y)=>{if(sort==='az'||sort==='za'){let z=(x.name||'').localeCompare(y.name||'');return sort==='az'?z:-z}let z=(x.createdAt?.seconds||0)-(y.createdAt?.seconds||0);return sort==='asc'?z:-z});
+  let accents=['#4f46e5','#059669','#ea580c','#db2777','#0891b2','#7c3aed'];
+  $('examCards').innerHTML=a.map((x,i)=>`<article class="exam-card glass p-5"><div class="exam-accent" style="background:${accents[i%accents.length]}"></div><div class="mt-2 text-xs text-blue-700 font-bold">${esc(x.subject||'Subject')} · ${esc(x.chapter||'—')}</div><h3 class="text-xl font-black mt-1">${esc(x.name)}</h3><p class="text-sm text-slate-500">${esc(x.teacherName||'Teacher')} · ${esc(x.institute||'')} · Code: ${esc(x.code)}</p><div class="exam-meta mt-4"><div><b>${x.questions?.length||0}</b><small class="block text-slate-500">प्रश्न</small></div><div><b>${x.duration?x.duration+' min':'∞'}</b><small class="block text-slate-500">समय</small></div><div><b>${esc(x.className||state.student.className)}</b><small class="block text-slate-500">वर्ग</small></div></div><button class="btn bg-blue-600 text-white w-full mt-4" onclick="startExam('${x.id}')">परीक्षा शुरू करें</button></article>`).join('')||'<div class="glass p-6 col-span-full text-center">इस खोज के लिए कोई परीक्षा नहीं मिली।</div>';
+}
+async function reloadStudentExams(){state.exams=await loadExamsForClass($('classFilter').value);renderExamCards()}
+async function startExam(id){let x=state.exams.find(e=>e.id===id);if(!x)return;state.exam=x;state.answers={};state.startedAt=Date.now();renderExam()}
+function renderExam(){let x=state.exam;clearInterval(state.timer);$('main').innerHTML=`<div class="sticky top-16 z-30 glass p-3 mb-4 flex flex-wrap justify-between gap-2"><div><b>${esc(x.name)}</b><div class="text-xs">Code: ${esc(x.code)} · Total: ${x.questions.length} · Attempted: <span id="attempted">0</span>/${x.questions.length}</div></div><div class="timer font-black text-lg">⏱ <span id="elapsed">00:00:00</span></div><button class="btn bg-red-600 text-white" onclick="submitExam()">Submit</button></div><div id="questions" class="space-y-4"></div>`;let qh='';x.questions.forEach((q,i)=>{qh+=`<article class="glass p-5 qcard" id="q${i}"><div class="font-bold mb-3">Q${i+1}. <span class="prose-mini">${renderMath(q.text)}</span></div>${q.image?`<img src="${esc(q.image)}" class="max-h-72 rounded-xl mb-4">`:''}<div class="grid ${q.horizontal?'md:grid-cols-4':'grid-cols-1'} gap-2">${q.options.map((o,j)=>`<label class="option" id="opt-${i}-${j}"><input type="radio" name="q${i}" value="${j}" onchange="pick(${i},${j})" class="mr-2">${String.fromCharCode(65+j)}. ${renderMath(o)}</label>`).join('')}</div></article>`});$('questions').innerHTML=qh;state.timer=setInterval(()=>{let sec=Math.floor((Date.now()-state.startedAt)/1000);$('elapsed').textContent=new Date(sec*1000).toISOString().slice(11,19);if(x.duration&&sec>=x.duration*60){clearInterval(state.timer);toast('समय पूरा हो गया। परीक्षा submit हो रही है।');submitExam()}},1000);if(window.MathJax)MathJax.typesetPromise()}
+function renderMath(s){return esc(s).replace(/\\\((.*?)\\\)/g,'\\($1\\)').replace(/\$\$(.*?)\$\$/gs,'\\[$1\\]')}
+function pick(i,j){state.answers[i]=j;document.querySelectorAll(`[id^="opt-${i}-"]`).forEach(x=>x.classList.remove('sel'));$('opt-'+i+'-'+j).classList.add('sel');$('attempted').textContent=Object.keys(state.answers).length}
+async function submitExam(){if(!state.exam)return;clearInterval(state.timer);let correct=0;state.exam.questions.forEach((q,i)=>{if(state.answers[i]===q.answer)correct++});let total=state.exam.questions.length,percent=total?+(correct/total*100).toFixed(2):0,elapsed=Math.floor((Date.now()-state.startedAt)/1000);let ref=await db.collection('attempts').add({examId:state.exam.id,examCode:state.exam.code,examName:state.exam.name,studentId:state.student.id,studentName:state.student.name,username:state.student.username,className:state.student.className,subject:state.exam.subject||'',chapter:state.exam.chapter||'',correct,total,percent,elapsed,answers:state.answers,questionSnapshot:state.exam.questions,createdAt:firebase.firestore.FieldValue.serverTimestamp()});showResult(ref.id,correct,total,percent,elapsed)}
+async function showResult(attemptId,correct,total,percent,elapsed){
+  let q=await db.collection('attempts').where('examId','==',state.exam.id).where('percent','>',percent).get(),rank=q.size+1;
+  $('main').innerHTML=`<section class="glass p-6 max-w-3xl mx-auto text-center overflow-hidden"><div class="firework"><span>🎆</span><span>✨</span><span>🎇</span><span>✨</span><span>🎆</span></div><h1 class="text-3xl font-black">${esc(state.student.name)}</h1><p class="text-slate-500">${esc(state.exam.subject||'')} · ${esc(state.exam.code)} · ${esc(state.exam.name)}</p><div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6"><div class="p-4 bg-slate-50 rounded-xl"><b>${correct}/${total}</b><br>Marks</div><div class="p-4 bg-slate-50 rounded-xl"><b>${percent}%</b><br>Percentage</div><div class="p-4 bg-slate-50 rounded-xl"><b>${rank}</b><br>Rank</div><div class="p-4 bg-slate-50 rounded-xl"><b>${fmtSec(elapsed)}</b><br>Time</div></div><div class="flex flex-wrap justify-center gap-2 mt-6"><button class="btn bg-blue-600 text-white" onclick="downloadResult('${attemptId}')">📥 Download Result</button><button class="btn border" onclick="downloadAnswers('${attemptId}')">📥 Answer Review</button><button class="btn border" onclick="studentProfile()">📋 मेरा रिकॉर्ड</button><button class="btn border" onclick="studentDashboard()">Back to Exams</button></div></section>`;
+}
+function fmtSec(s){return Math.floor(s/3600).toString().padStart(2,'0')+':'+Math.floor(s%3600/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0')}
+async function downloadResult(id){let d=(await db.collection('attempts').doc(id).get()).data();downloadText('result-'+d.examCode+'.txt',`Student: ${d.studentName}\nExam: ${d.examName}\nCode: ${d.examCode}\nMarks: ${d.correct}/${d.total}\nPercentage: ${d.percent}%\nTime: ${fmtSec(d.elapsed)}\nDate: ${d.createdAt?.toDate?.().toLocaleString('en-IN')||''}`)}
+async function downloadAnswers(id){let d=(await db.collection('attempts').doc(id).get()).data(),out=`${d.examName} (${d.examCode})\nStudent: ${d.studentName}\n\n`;d.questionSnapshot.forEach((q,i)=>{let a=d.answers[i],right=q.answer;out+=`Q${i+1}. ${q.text}\nYour answer: ${a==null?'Not answered':String.fromCharCode(65+a)+' '+q.options[a]}\nCorrect: ${String.fromCharCode(65+right)} ${q.options[right]}\nStatus: ${a===right?'CORRECT':'WRONG'}\n\n`});downloadText('answer-review-'+d.examCode+'.txt',out)}
+function downloadText(n,t){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/plain;charset=utf-8'}));a.download=n;a.click();URL.revokeObjectURL(a.href)}
+async function studentEditProfile(){let x=state.student;$('main').innerHTML=`<section class="glass p-5 max-w-xl mx-auto"><button class="btn border" onclick="studentDashboard()">Back</button><h2 class="text-2xl font-black mt-3">मेरा प्रोफाइल Edit</h2><label class="block mt-4 font-bold">नाम<input id="spn" value="${esc(x.name)}" class="w-full border rounded-xl p-3 mt-1"></label><label class="block mt-3 font-bold">Username<input id="spu" value="${esc(x.username)}" class="w-full border rounded-xl p-3 mt-1"></label><label class="block mt-3 font-bold">वर्ग<select id="spc" class="w-full border rounded-xl p-3 mt-1">${['6','7','8','9','10','11-Arts','11-Science','12-Arts','12-Science'].map(c=>`<option ${x.className===c?'selected':''}>${c}</option>`).join('')}</select></label><button class="btn bg-blue-600 text-white mt-4" onclick="saveStudentProfile()">Save Profile</button></section>`}
+async function saveStudentProfile(){let name=$('spn').value.trim(),u=$('spu').value.trim().toLowerCase(),c=$('spc').value;if(!name||!u)return toast('नाम और username जरूरी है');let q=await db.collection('students').where('username','==',u).limit(2).get();if(q.docs.some(d=>d.id!==state.student.id))return toast('यह username पहले से मौजूद है');await db.collection('students').doc(state.student.id).update({name,username:u,className:c,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});state.student={...state.student,name,username:u,className:c};toast('Profile update हो गया');studentDashboard()}
+async function studentProfile(){let q=await db.collection('attempts').where('studentId','==',state.student.id).get();let a=q.docs.map(d=>d.data()).sort((x,y)=>(y.createdAt?.seconds||0)-(x.createdAt?.seconds||0));$('main').innerHTML=`<div class="glass p-5"><div class="flex justify-between"><div><h2 class="text-2xl font-black">मेरा परीक्षा रिकॉर्ड</h2><p>${esc(state.student.name)} · ${esc(state.student.className)}</p></div><button class="btn border" onclick="studentDashboard()">Back</button></div><div class="tablewrap mt-5"><table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Exam</th><th>Code</th><th>Marks</th><th>%</th><th>Time</th><th>Date</th></tr></thead><tbody>${a.map(x=>`<tr class="border-b"><td class="p-2">${esc(x.examName)}</td><td>${esc(x.examCode)}</td><td>${x.correct}/${x.total}</td><td>${x.percent}%</td><td>${fmtSec(x.elapsed)}</td><td>${x.createdAt?.toDate?.().toLocaleString('en-IN')||''}</td></tr>`).join('')}</tbody></table></div></div>`}
+async function downloadStudentHistory(){
+  let q=await db.collection('attempts').where('studentId','==',state.student.id).get(),a=q.docs.map(d=>d.data());
+  let out=`विद्यार्थी: ${state.student.name}\nवर्ग: ${state.student.className}\nUsername: ${state.student.username}\n\n`+a.map(x=>`${x.examName} | ${x.examCode} | ${x.correct}/${x.total} | ${x.percent}% | ${fmtSec(x.elapsed)} | ${x.createdAt?.toDate?.().toLocaleString('en-IN')||''}`).join('\n');
+  downloadFile('my-exam-history-'+state.student.username+'.txt',out,'text/plain;charset=utf-8');
+}
+async function changeStudentCredentials(){let nu=prompt('नया username',state.student.username);if(!nu)return;let q=await db.collection('students').where('username','==',nu.toLowerCase()).limit(1).get();if(!q.empty&&q.docs[0].id!==state.student.id)return toast('Username पहले से मौजूद है');let p=prompt('नया password (खाली छोड़ें तो वही रहेगा)');let up={username:nu.toLowerCase()};if(p)up.passwordHash=await hash(p);await db.collection('students').doc(state.student.id).update(up);state.student.username=nu.toLowerCase();toast('Credentials updated');studentDashboard()}
+async function studentMessages(){let [mq,tq]=await Promise.all([db.collection('messages').where('studentId','==',state.student.id).get(),db.collection('teachers').get()]);let msgs=mq.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));let teachers=tq.docs.map(d=>({id:d.id,...d.data()}));$('main').innerHTML=`<section class="glass p-5 max-w-3xl mx-auto"><div class="flex justify-between"><div><h2 class="text-2xl font-black">💬 Teacher Chat</h2><p class="text-slate-500">WhatsApp जैसी बातचीत: संदेश भेजें और reply पाएं।</p></div><button class="btn border" onclick="studentDashboard()">Back</button></div><div class="mt-4"><select id="studentTeacher" class="w-full border rounded-xl p-3">${teachers.map(t=>`<option value="${t.id}">${esc(t.name||t.email)} · ${esc(t.email||'')}</option>`).join('')}</select></div><div class="mt-4 border rounded-2xl overflow-hidden"><div class="h-80 overflow-auto p-4 space-y-2 bg-white">${msgs.map(m=>`<div class="flex ${m.sender==='student'?'justify-end':'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-2 ${m.sender==='student'?'bg-blue-600 text-white':'bg-slate-100'}"><b class="text-xs">${esc(m.sender==='student'?'You':m.teacherName||'Teacher')}</b><div>${esc(m.text)}</div><div class="text-[10px] opacity-70 mt-1">${m.createdAt?.toDate?.().toLocaleString('en-IN')||''}</div></div></div>`).join('')||'<p class="text-slate-500">अभी कोई message नहीं है।</p>'}</div><div class="p-3 border-t flex gap-2"><input id="studentMsgInput" class="flex-1 border rounded-xl p-3" placeholder="Message लिखें..." onkeydown="if(event.key==='Enter')sendStudentMessage()"><button class="btn bg-blue-600 text-white" onclick="sendStudentMessage()">Send</button></div></div></section>`}
+async function sendStudentMessage(){let t=$('studentMsgInput')?.value.trim(),teacherId=$('studentTeacher')?.value;if(!t||!teacherId)return;let td=(await db.collection('teachers').doc(teacherId).get()).data()||{};await db.collection('messages').add({studentId:state.student.id,teacherId,teacherName:td.name||td.email||'Teacher',sender:'student',text:t,createdAt:firebase.firestore.FieldValue.serverTimestamp(),read:false});toast('Message भेज दिया गया');studentMessages()}
+function showTeacherLogin(){
+  $('main').innerHTML=`<section class="glass p-6 max-w-md mx-auto">
+    <h1 class="text-2xl font-black">👨‍🏫 Teacher Login</h1>
+    <p class="text-slate-500 mt-1">Email और Password से प्रवेश करें</p>
+    <form onsubmit="teacherLogin(event)" class="space-y-3 mt-5">
+      <label class="block font-bold">Email<input id="te" required type="email" autocomplete="email" class="w-full border rounded-xl p-3 mt-1" placeholder="teacher@example.com"></label>
+      <label class="block font-bold">Password<div class="flex gap-2 mt-1"><input id="tp" required type="password" autocomplete="current-password" class="w-full border rounded-xl p-3" placeholder="Password"><button type="button" class="btn border" onclick="togglePass('tp',this)">👁️</button></div></label>
+      <button class="btn bg-emerald-600 text-white w-full">Login</button>
+    </form>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+      <button class="btn border" onclick="teacherRegister()">Create Account</button>
+      <button class="btn border" onclick="teacherForgotPassword()">Forgot Password</button>
+    </div>
+  </section>`;
+}
+function togglePass(id,btn){let x=$(id);if(!x)return;x.type=x.type==='password'?'text':'password';if(btn)btn.textContent=x.type==='password'?'👁️':'🙈'}
+async function teacherRegister(){
+  $('main').innerHTML=`<section class="glass p-6 max-w-md mx-auto">
+    <button class="btn border" onclick="showTeacherLogin()">← Back</button>
+    <h2 class="text-2xl font-black mt-4">Create Teacher Account</h2>
+    <form onsubmit="createTeacherAccount(event)" class="space-y-3 mt-5">
+      <input id="trn" required class="w-full border rounded-xl p-3" placeholder="Teacher Name">
+      <input id="tre" required type="email" class="w-full border rounded-xl p-3" placeholder="Email">
+      <div class="flex gap-2"><input id="trp" required minlength="6" type="password" class="w-full border rounded-xl p-3" placeholder="Password"><button type="button" class="btn border" onclick="togglePass('trp',this)">👁️</button></div>
+      <div class="flex gap-2"><input id="trpc" required minlength="6" type="password" class="w-full border rounded-xl p-3" placeholder="Confirm Password"><button type="button" class="btn border" onclick="togglePass('trpc',this)">👁️</button></div>
+      <button class="btn bg-emerald-600 text-white w-full">Create Account</button>
+    </form>
+  </section>`;
+}
+async function createTeacherAccount(e){
+  e.preventDefault();
+  let n=$('trn').value.trim(),email=$('tre').value.trim().toLowerCase(),p=$('trp').value,pc=$('trpc').value;
+  if(p!==pc)return toast('दोनों Password एक जैसे नहीं हैं');
+  try{
+    let cred=await auth.createUserWithEmailAndPassword(email,p);
+    await db.collection('teachers').doc(cred.user.uid).set({name:n,email,photoURL:'',createdAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    state.teacher={id:cred.user.uid,name:n,email};
+    toast('Teacher account सफलतापूर्वक बन गया');
+    await teacherDashboard();
+  }catch(x){toast(firebaseAuthMessage(x));console.error(x)}
+}
+async function teacherForgotPassword(){
+  let email=prompt('अपना Teacher Email डालें');
+  if(!email)return;
+  try{await auth.sendPasswordResetEmail(email.trim().toLowerCase());toast('Password reset link आपके Email पर भेज दिया गया है।');}
+  catch(x){toast(firebaseAuthMessage(x));}
+}
+function firebaseAuthMessage(x){
+  const c=x?.code||'';
+  return ({
+    'auth/invalid-credential':'Email या Password गलत है।',
+    'auth/wrong-password':'Password गलत है।',
+    'auth/user-not-found':'इस Email से Teacher account नहीं मिला।',
+    'auth/invalid-email':'Email सही format में डालें।',
+    'auth/user-disabled':'यह Teacher account disabled है।',
+    'auth/too-many-requests':'बहुत बार कोशिश हुई है। कुछ देर बाद फिर कोशिश करें।',
+    'auth/network-request-failed':'Internet/Firebase connection की समस्या है।',
+    'auth/operation-not-allowed':'Firebase Authentication में Email/Password अभी Enabled नहीं है।',
+    'auth/unauthorized-domain':'इस वेबसाइट का domain Firebase Authentication → Settings → Authorized domains में जोड़ें।',
+    'auth/configuration-not-found':'Firebase Authentication configuration की समस्या है। Project और Web App configuration जाँचें।',
+    'auth/invalid-api-key':'Firebase API key गलत है। Firebase Project Settings से Web App config फिर से लें।',
+    'auth/email-already-in-use':'इस Email से account पहले से बना है। Login या Forgot Password इस्तेमाल करें।'
+  }[c]||('Firebase Error: '+(x?.message||'Unknown error')));
+}
+async function teacherLogin(e){
+  e.preventDefault();
+  const email=$('te').value.trim().toLowerCase(),password=$('tp').value;
+  try{
+    const cred=await auth.signInWithEmailAndPassword(email,password);
+    const snap=await db.collection('teachers').doc(cred.user.uid).get();
+    if(!snap.exists)await db.collection('teachers').doc(cred.user.uid).set({name:cred.user.displayName||email.split('@')[0],email},{merge:true});
+    toast('Login सफल');
+    await teacherDashboard();
+  }catch(x){toast(firebaseAuthMessage(x));console.error('Teacher Login Error',x)}
+}
+async function changeTeacherPassword(){
+  let u=auth.currentUser;if(!u)return;
+  let current=prompt('सुरक्षा के लिए अपना वर्तमान Password डालें');
+  if(!current)return;
+  let np=prompt('नया Password डालें (कम से कम 6 अक्षर)');
+  if(!np||np.length<6)return toast('नया Password कम से कम 6 अक्षर का रखें');
+  let cp=prompt('नया Password फिर से डालें');
+  if(np!==cp)return toast('नया Password match नहीं हुआ');
+  try{
+    let cred=firebase.auth.EmailAuthProvider.credential(u.email,current);
+    await u.reauthenticateWithCredential(cred);
+    await u.updatePassword(np);
+    toast('Password सफलतापूर्वक बदल गया');
+  }catch(x){toast(firebaseAuthMessage(x)+(x?.code==='auth/wrong-password'?'':' '))}
+}
+async function teacherDashboard(){
+  let u=auth.currentUser;if(!u)return showTeacherLogin();
+  let td=await db.collection('teachers').doc(u.uid).get();
+  state.teacher={id:u.uid,...(td.data()||{name:u.email,email:u.email})};
+  let docs=new Map();
+  const addQ=async(q)=>{try{let snap=await q.get();snap.forEach(d=>docs.set(d.id,{id:d.id,...d.data()}))}catch(e){console.warn(e)}};
+  await Promise.all([
+    addQ(db.collection('exams').where('teacherId','==',u.uid)),
+    state.teacher.email?addQ(db.collection('exams').where('teacherEmail','==',state.teacher.email)):Promise.resolve(),
+    state.teacher.name?addQ(db.collection('exams').where('teacherName','==',state.teacher.name)):Promise.resolve()
+  ]);
+  // Legacy recovery: include older records that have no modern owner field.
+  if(!docs.size){
+    try{
+      let all=await db.collection('exams').get();
+      all.forEach(d=>{let x=d.data()||{},owner=x.teacherId||x.ownerId||x.createdBy||x.teacherEmail||x.teacherName;
+        if(owner==null||owner===u.uid||owner===state.teacher.email||owner===state.teacher.name)docs.set(d.id,{id:d.id,...x});
+      });
+    }catch(e){console.warn(e)}
+  }
+  // One visible exam per unique code; newest record wins.
+  const byCode=new Map();
+  [...docs.values()].forEach(x=>{let k=(x.code||x.id||'').trim().toUpperCase();let old=byCode.get(k);let ts=x.updatedAt?.seconds||x.createdAt?.seconds||0;let ots=old?.updatedAt?.seconds||old?.createdAt?.seconds||0;if(!old||ts>=ots)byCode.set(k,x)});
+  state.exams=[...byCode.values()];
+  $('main').innerHTML=`<header class="glass p-4 mb-4"><div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3"><div class="w-14 h-14 rounded-full overflow-hidden border-2 border-blue-500 bg-slate-100 flex items-center justify-center">${state.teacher.photoURL?`<img src="${esc(state.teacher.photoURL)}" class="w-full h-full object-cover">`:'👨‍🏫'}</div><div><h1 class="text-2xl font-black">${esc(state.teacher.name||'Teacher')}</h1><p class="text-slate-500">डैशबोर्ड से परीक्षा और परिणाम मैनेज करें</p></div></div>
+    <div class="flex gap-2"><button class="btn bg-blue-700 text-white" onclick="teacherExams()">📊 डैशबोर्ड</button><button class="btn bg-amber-500 text-white" onclick="showHome()">🎓 Student Portal</button><button class="btn bg-rose-600 text-white" onclick="auth.signOut();showHome()">Logout</button></div>
+  </div></header>
+  <nav class="glass p-2 flex gap-2 overflow-auto"><button class="btn bg-blue-600 text-white tab" onclick="teacherExams()">मेरी परीक्षाएं</button><button class="btn border tab" onclick="createExam()">➕ Create Exam</button><button class="btn border tab" onclick="teacherMerit()">🏆 Merit List</button><button class="btn border tab" onclick="deletedExams()">♻️ Recycle Bin</button><button class="btn border tab" onclick="cleanupDuplicateExams()">🧹 Duplicate Cleanup</button><button class="btn border tab" onclick="studentsAdmin()">👨‍🎓 Students</button><button class="btn border tab" onclick="teacherMessages()">💬 Messages</button><button class="btn border tab" onclick="teacherProfile()">👤 Profile</button></nav>
+  <div id="teacherView" class="mt-5"></div>`;
+  teacherExams();
+}
+function teacherExams(){
+  let a=[...state.exams];
+  $('teacherView').innerHTML=`<section class="glass p-5">
+    <div class="flex flex-wrap justify-between gap-3 items-center">
+      <div><h2 class="text-2xl font-black">मेरी परीक्षाएं (${a.length})</h2><p class="text-slate-500">Search से नाम, code, subject, chapter, class या teacher के नाम से तुरंत खोजें।</p></div>
+      <div class="flex gap-2 flex-wrap"><select id="tSort" onchange="teacherExams()" class="border rounded-xl p-2"><option value="new">नवीन पहले</option><option value="old">पुरानी पहले</option><option value="az">A–Z</option><option value="za">Z–A</option></select><select id="tClass" onchange="teacherExams()" class="border rounded-xl p-2"><option value="">सभी वर्ग</option>${['6','7','8','9','10','11-Arts','11-Science','12-Arts','12-Science'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    </div>
+    <input id="tSearch" oninput="teacherExams()" class="w-full border rounded-xl p-3 mt-4" placeholder="🔎 परीक्षा नाम / Code / Subject / Chapter / Teacher / Class खोजें">
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">${(()=>{
+      let s=($('tSearch')?.value||'').toLowerCase(),cl=$('tClass')?.value||'',sort=$('tSort')?.value||'new';
+      let f=a.filter(x=>{let hay=[x.name,x.code,x.subject,x.chapter,x.teacherName,x.institute,...(x.classes||[])].join(' ').toLowerCase();return (!s||hay.includes(s))&&(!cl||(x.classes||[]).includes(cl))});
+      f.sort((x,y)=>{if(sort==='az'||sort==='za'){let z=(x.name||'').localeCompare(y.name||'');return sort==='az'?z:-z}let z=(x.createdAt?.seconds||0)-(y.createdAt?.seconds||0);return sort==='old'?z:-z});
+      return f.map((x,i)=>{let accents=['#4f46e5','#059669','#ea580c','#db2777','#0891b2','#7c3aed'];let ac=accents[i%accents.length];return `<article class="exam-card glass p-5"><div class="exam-accent" style="background:${ac}"></div><div class="flex justify-between gap-2 mt-2"><div><div class="text-xs font-bold text-blue-700">${esc(x.subject||'Subject')} · ${esc(x.chapter||'—')}</div><h3 class="text-xl font-black mt-1">${esc(x.name||'Untitled Exam')}</h3></div><span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">${x.deleted?'Deleted':'Published'}</span></div><p class="text-sm text-slate-500 mt-2">${esc(x.institute||'')} · Code: <b>${esc(x.code||x.id)}</b></p><div class="exam-meta mt-4"><div><b>${x.questions?.length||0}</b><small class="block text-slate-500">Questions</small></div><div><b>${(x.classes||[]).join(', ')||'—'}</b><small class="block text-slate-500">Classes</small></div><div><b>${x.duration?x.duration+' min':'∞'}</b><small class="block text-slate-500">Time</small></div></div><div class="flex flex-wrap gap-2 mt-4"><button class="btn border" onclick="copyExamLink('${esc(x.code||x.id)}')">🔗 Copy Link</button><button class="btn border" onclick="editExam('${x.id}')">✏️ Edit</button><button class="btn border" onclick="teacherMerit('${x.id}')">🏆 Merit List</button><button class="btn bg-red-600 text-white" onclick="softDeleteExam('${x.id}')">🗑️ Delete</button></div></article>`}).join('')||'<div class="glass p-6 col-span-full text-center text-slate-500">कोई परीक्षा नहीं मिली।</div>';
+    })()}</div>
+  </section>`;
+}
+async function copyExamLink(code){let link=location.href.split('#')[0].split('?')[0]+'?exam='+encodeURIComponent(code);try{await navigator.clipboard.writeText(link);toast('Exam link copy हो गया')}catch(e){prompt('Exam Link',link)}}
+async function cleanupDuplicateExams(){
+  if(!auth.currentUser)return;
+  if(!confirm('एक ही Exam Code वाली duplicate परीक्षाओं में सबसे नई परीक्षा रखकर बाकी duplicate records permanently delete करें?'))return;
+  try{
+    let snap=await db.collection('exams').get(),groups={};
+    snap.forEach(d=>{let x=d.data()||{},owner=x.teacherId||x.ownerId||x.createdBy||x.teacherEmail||x.teacherName;
+      if(owner==null||owner===auth.currentUser.uid||owner===state.teacher.email||owner===state.teacher.name){let k=(x.code||d.id||'').trim().toUpperCase();(groups[k]??=[]).push({id:d.id,...x})}});
+    let removed=0;
+    for(const k of Object.keys(groups)){let arr=groups[k];if(arr.length<2)continue;arr.sort((a,b)=>(b.updatedAt?.seconds||b.createdAt?.seconds||0)-(a.updatedAt?.seconds||a.createdAt?.seconds||0));for(const dup of arr.slice(1)){await db.collection('exams').doc(dup.id).delete();removed++}}
+    toast(removed?`${removed} duplicate exams permanently delete हो गईं`:'कोई duplicate exam नहीं मिला');await teacherDashboard();
+  }catch(e){toast('Duplicate cleanup नहीं हो सका: '+(e.message||''))}
+}
+function createExam(edit=null){
+  let x=edit||{}; state.editingExam=edit; state.tempQuestions=(x.questions||[]).map(q=>({...q}));
+  $('teacherView').innerHTML=`<section class="glass p-5">
+    <div class="flex flex-wrap justify-between gap-3 items-center"><div><h2 class="text-2xl font-black">🚀 नई परीक्षा बनाएं</h2><p class="text-slate-500">फॉर्म मोबाइल पर vertical और बड़ी स्क्रीन पर grid में अपने-आप व्यवस्थित होगा।</p></div><button class="btn bg-emerald-600 text-white" onclick="publishExam()" id="publishBtn">Publish Exam</button></div>
+    <div class="grid md:grid-cols-2 gap-3 mt-5">
+      <input id="en" value="${esc(x.name||'')}" class="border rounded-xl p-3" placeholder="Exam Name">
+      <input id="ec" value="${esc(x.code||'')}" class="border rounded-xl p-3" placeholder="Unique Exam Code">
+      <input id="ei" value="${esc(x.institute||'')}" class="border rounded-xl p-3" placeholder="Institution Name">
+      <input id="es" value="${esc(x.subject||'')}" class="border rounded-xl p-3" placeholder="Subject">
+      <input id="ech" value="${esc(x.chapter||'')}" class="border rounded-xl p-3" placeholder="Chapter">
+      <select id="ed" class="border rounded-xl p-3"><option value="">Unlimited Time</option>${[30,60,90,120,180].map(n=>`<option value="${n}" ${x.duration==n?'selected':''}>${n} min</option>`).join('')}</select>
+      <div class="border rounded-xl p-3 md:col-span-2"><b>कक्षा चुनें</b><div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">${['6','7','8','9','10','11-Arts','11-Science','12-Arts','12-Science'].map(c=>`<label><input type="checkbox" class="cls" value="${c}" ${x.classes?.includes(c)?'checked':''}> ${c}</label>`).join('')}</div></div>
+    </div>
+    <div class="glass p-4 mt-5 bg-slate-50"><h3 class="font-black">⚡ एक साथ प्रश्न पेस्ट करें</h3><p class="text-xs text-slate-500">Format: प्रश्न | A | B | C | D | सही विकल्प. LaTeX: \\(x^2\\), \\frac{1}{2}</p><textarea id="bulk" class="w-full min-h-48 border rounded-xl p-3 mt-2" placeholder="प्रश्न | विकल्प A | विकल्प B | विकल्प C | विकल्प D | A"></textarea><button class="btn border mt-2" onclick="parseBulk()">⚡ प्रश्न लोड करें</button></div>
+    <div id="qEditor" class="space-y-3 mt-5"></div>
+    <div class="mt-5 flex flex-wrap gap-2"><button class="btn border" onclick="addQuestion()">+ Add Question</button><button class="btn bg-emerald-600 text-white" onclick="publishExam()" id="publishBtn2">Publish Exam</button></div>
+  </section>`;
+  renderEditor(state.tempQuestions);
+}
+function parseBulk(){let t=$('bulk').value.trim();if(!t)return;let qs=t.split(/\n+/).map(line=>{let p=line.split('|').map(s=>s.trim());return p.length>=6?{text:p[0],options:p.slice(1,5),answer:'ABCD'.indexOf(p[5].toUpperCase()),horizontal:false}:null}).filter(Boolean);state.tempQuestions=(state.tempQuestions||[]).concat(qs);$('bulk').value='';renderEditor(state.tempQuestions)}
+function addQuestion(){state.tempQuestions=state.tempQuestions||[];state.tempQuestions.push({text:'',options:['','','',''],answer:0,horizontal:false});renderEditor(state.tempQuestions)}
+function renderEditor(qs){
+  state.tempQuestions=qs.map(q=>({...q,options:[...(q.options||[]),'','','',''].slice(0,4),layout:q.layout||((q.horizontal)?'horizontal':'vertical')}));
+  $('qEditor').innerHTML=state.tempQuestions.map((q,i)=>`<div class="border rounded-xl p-4 bg-white"><div class="flex justify-between gap-2"><b>Question ${i+1}</b><button class="danger" onclick="state.tempQuestions.splice(${i},1);renderEditor(state.tempQuestions)">Delete</button></div><textarea class="qtext w-full border rounded-xl p-2 mt-2" placeholder="Question">${esc(q.text)}</textarea><div class="grid md:grid-cols-2 gap-2 mt-2">${q.options.map((o,j)=>`<input class="qopt border rounded-xl p-2" data-i="${i}" value="${esc(o)}" placeholder="Option ${String.fromCharCode(65+j)}">`).join('')}</div><div class="flex flex-wrap gap-3 mt-3 items-center"><label>Correct <select class="qans border p-2 rounded" data-i="${i}">${['A','B','C','D'].map((a,j)=>`<option value="${j}" ${q.answer===j?'selected':''}>${a}</option>`).join('')}</select></label><label>Options <select class="qlayout border p-2 rounded" data-i="${i}"><option value="vertical" ${q.layout==='vertical'?'selected':''}>ऊर्ध्वाधर (Vertical)</option><option value="horizontal" ${q.layout==='horizontal'?'selected':''}>क्षितिज (Horizontal)</option></select></label><input type="file" class="qimg" data-i="${i}" accept="image/*"></div><div class="q-layout-preview mt-2 text-sm">Preview: <span>${q.layout==='horizontal'?'A · B · C · D':'A<br>B<br>C<br>D'}</span></div></div>`).join('');
+  document.querySelectorAll('.qtext').forEach((e,i)=>e.oninput=()=>state.tempQuestions[i].text=e.value);
+  document.querySelectorAll('.qopt').forEach(e=>e.oninput=()=>{let i=+e.dataset.i;let els=[...document.querySelectorAll(`.qopt[data-i="${i}"]`)];state.tempQuestions[i].options=els.map(z=>z.value)});
+  document.querySelectorAll('.qans').forEach(e=>e.onchange=()=>state.tempQuestions[e.dataset.i].answer=+e.value);
+  document.querySelectorAll('.qlayout').forEach(e=>e.onchange=()=>{state.tempQuestions[e.dataset.i].layout=e.value;state.tempQuestions[e.dataset.i].horizontal=e.value==='horizontal';renderEditor(state.tempQuestions)});
+  document.querySelectorAll('.qimg').forEach(e=>e.onchange=async()=>{let f=e.files[0];if(!f)return;try{let ref=storage.ref('exam-images/'+auth.currentUser.uid+'/'+Date.now()+'-'+f.name);await ref.put(f);state.tempQuestions[e.dataset.i].image=await ref.getDownloadURL();toast('Image uploaded')}catch(x){toast('Image upload नहीं हुआ')}})
+}
+async function publishExam(){
+  let b=$('publishBtn'),b2=$('publishBtn2');if(state.publishing)return;state.publishing=true;[b,b2].forEach(x=>{if(x){x.disabled=true;x.textContent='⏳ सुरक्षित हो रहा है...'}});
+  try{
+    let code=$('ec').value.trim().toUpperCase();if(!code)throw Error('Exam code जरूरी है');
+    let classes=[...document.querySelectorAll('.cls:checked')].map(x=>x.value);if(!classes.length)throw Error('कम से कम एक class चुनें');
+    let questions=state.tempQuestions||[];if(!questions.length)throw Error('कम से कम एक question जोड़ें');
+    let name=$('en').value.trim();if(!name)throw Error('Exam Name जरूरी है');
+    let data={name,code,institute:$('ei').value.trim(),subject:$('es').value.trim(),chapter:$('ech').value.trim(),duration:$('ed').value?+$('ed').value:null,classes,questions,published:true,deleted:false,teacherId:auth.currentUser.uid,teacherEmail:auth.currentUser.email,teacherName:state.teacher.name,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+    if(state.editingExam){
+      let same=await db.collection('exams').where('code','==',code).get();
+      if(same.docs.some(d=>d.id!==state.editingExam.id))throw Error('यह Exam Code किसी दूसरी परीक्षा में पहले से है — नया code चुनें');
+      await db.collection('exams').doc(state.editingExam.id).update(data)
+    } else{
+      let ref=db.collection('exams').doc(code);
+      await db.runTransaction(async tx=>{let snap=await tx.get(ref);if(snap.exists)throw Error('यह Exam Code पहले से मौजूद है — नया code चुनें');tx.set(ref,{...data,createdAt:firebase.firestore.FieldValue.serverTimestamp()})});
+    }
+    toast('Exam successfully published');state.tempQuestions=[];state.editingExam=null;await teacherDashboard();
+  }catch(e){toast(e.message||'Exam save नहीं हुआ')}
+  finally{state.publishing=false;[b,b2].forEach(x=>{if(x){x.disabled=false;x.textContent='Publish Exam'}})}
+}
+async function editExam(id){let x=state.exams.find(e=>e.id===id);createExam(x)}
+async function softDeleteExam(id){
+  if(!confirm('परीक्षा को Recycle Bin में भेजें?'))return;
+  try{await db.collection('exams').doc(id).update({published:false,deleted:true,deletedAt:firebase.firestore.FieldValue.serverTimestamp()});state.exams=state.exams.filter(x=>x.id!==id);toast('परीक्षा Recycle Bin में भेज दी गई');teacherExams()}
+  catch(e){toast('Delete नहीं हुआ: '+(e.message||''))}
+}
+async function deletedExams(){let q=await db.collection('exams').where('teacherId','==',auth.currentUser.uid).where('deleted','==',true).get();let a=q.docs.map(d=>({id:d.id,...d.data()}));for(const x of a){if(x.deletedAt?.toDate&&Date.now()-x.deletedAt.toDate().getTime()>15*86400000)await db.collection('exams').doc(x.id).delete()}a=a.filter(x=>x.deletedAt?.toDate&&Date.now()-x.deletedAt.toDate().getTime()<=15*86400000);$('teacherView').innerHTML=`<section class="glass p-5"><button class="btn border" onclick="teacherExams()">Back</button><h2 class="text-xl font-black mt-3">Recycle Bin · 15 days</h2>${a.map(x=>`<div class="border rounded-xl p-4 mt-3 flex justify-between"><span>${esc(x.name)} · ${esc(x.code)}</span><button class="btn bg-emerald-600 text-white" onclick="recoverExam('${x.id}')">Recover</button></div>`).join('')||'<p class="mt-3">Recycle bin empty.</p>'}</section>`}
+async function recoverExam(id){await db.collection('exams').doc(id).update({deleted:false,published:true,deletedAt:firebase.firestore.FieldValue.delete()});await teacherDashboard()}
+async function teacherMerit(selectedExamId=''){
+  let q=await db.collection('attempts').get(),a=q.docs.map(d=>({id:d.id,...d.data()})).filter(x=>state.exams.some(e=>e.id===x.examId));
+  $('teacherView').innerHTML=`<section class="glass p-5"><div class="flex justify-between items-center gap-2"><div><h2 class="text-2xl font-black">🏆 Merit List</h2><p class="text-slate-500">लाइनिंग वाला पूरा table + विद्यार्थी का पूरा detail देखने का विकल्प</p></div><button class="btn border" onclick="teacherExams()">← मेरी परीक्षाएं</button></div>
+  <div class="flex flex-wrap gap-2 mt-4"><select id="mexam" onchange="teacherMerit(this.value)" class="border rounded-xl p-2"><option value="">All Exams</option>${state.exams.map(x=>`<option value="${x.id}" ${selectedExamId===x.id?'selected':''}>${esc(x.name)} · ${esc(x.code)}</option>`).join('')}</select><select id="mclass" onchange="teacherMerit()" class="border rounded-xl p-2"><option value="">All Classes</option>${['6','7','8','9','10','11-Arts','11-Science','12-Arts','12-Science'].map(c=>`<option>${c}</option>`).join('')}</select><select id="msort" onchange="teacherMerit()" class="border rounded-xl p-2"><option value="score">Highest score</option><option value="date">Latest</option><option value="name">Student A–Z</option></select><button class="btn bg-blue-600 text-white" onclick="downloadMerit()">📥 Download File</button></div>
+  <div class="tablewrap mt-4"><table class="w-full text-sm sticky-table"><thead><tr class="text-left"><th>Rank</th><th>नाम</th><th>वर्ग</th><th>परीक्षा</th><th>Code</th><th>हल किए</th><th>सही</th><th>गलत</th><th>अंक</th><th>कार्रवाई</th></tr></thead><tbody>${a.filter(x=>(!$('mexam')?.value||x.examId===$('mexam').value)&&(!$('mclass')?.value||x.className===$('mclass').value)).sort((x,y)=>{let s=$('msort')?.value||'score';if(s==='date')return (y.createdAt?.seconds||0)-(x.createdAt?.seconds||0);if(s==='name')return (x.studentName||'').localeCompare(y.studentName||'');return y.percent-x.percent}).map((x,i)=>`<tr><td>${$('mexam')?.value?i+1:'—'}</td><td><button class="font-bold text-blue-700 underline" onclick="studentFullDetails('${esc(x.studentId)}','${esc(x.id)}')">${esc(x.studentName)}</button></td><td>${esc(x.className||'')}</td><td>${esc(x.examName||'')}</td><td>${esc(x.examCode||'')}</td><td>${Object.keys(x.answers||{}).length}/${x.total}</td><td class="text-green-600 font-bold">${x.correct}</td><td class="text-red-600">${x.total-x.correct}</td><td>${x.percent}%</td><td><button class="btn border" onclick="attemptDetails('${x.id}')">View</button> <button class="danger" onclick="deleteAttempt('${x.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="10" class="text-center p-6">कोई रिकॉर्ड नहीं मिला।</td></tr>'}</tbody></table></div></section>`;
+}
+async function studentFullDetails(studentId,attemptId=''){
+  let st=(await db.collection('students').doc(studentId).get()).data()||{};
+  let aq=await db.collection('attempts').where('studentId','==',studentId).get();
+  let attempts=aq.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  $('teacherView').innerHTML=`<section class="glass p-5"><div class="flex justify-between gap-2"><div><h2 class="text-2xl font-black">👨‍🎓 विद्यार्थी का पूरा विवरण</h2><p class="text-slate-500">${esc(st.name||'')} · @${esc(st.username||'')}</p></div><button class="btn border" onclick="teacherMerit()">← Merit List</button></div>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5"><div class="border rounded-xl p-4"><b>${esc(st.name||'—')}</b><small class="block">नाम</small></div><div class="border rounded-xl p-4"><b>${esc(st.username||'—')}</b><small class="block">Username</small></div><div class="border rounded-xl p-4"><b>${esc(st.className||'—')}</b><small class="block">वर्ग</small></div><div class="border rounded-xl p-4"><b>${attempts.length}</b><small class="block">परीक्षा प्रयास</small></div></div>
+  <h3 class="font-black text-xl mt-6">परीक्षा रिकॉर्ड</h3><div class="tablewrap mt-3"><table class="w-full sticky-table"><thead><tr><th>परीक्षा</th><th>Code</th><th>अंक</th><th>%</th><th>समय</th><th>तारीख</th><th>Details</th></tr></thead><tbody>${attempts.map(x=>`<tr><td>${esc(x.examName)}</td><td>${esc(x.examCode)}</td><td>${x.correct}/${x.total}</td><td>${x.percent}%</td><td>${fmtSec(x.elapsed)}</td><td>${x.createdAt?.toDate?.().toLocaleString('en-IN')||''}</td><td><button class="btn border" onclick="attemptDetails('${x.id}')">View</button></td></tr>`).join('')||'<tr><td colspan="7">कोई परीक्षा रिकॉर्ड नहीं।</td></tr>'}</tbody></table></div><button class="btn bg-blue-600 text-white mt-4" onclick="downloadStudentDetails('${esc(studentId)}')">📥 विद्यार्थी Detail Download</button></section>`;
+}
+async function downloadStudentDetails(studentId){
+  let st=(await db.collection('students').doc(studentId).get()).data()||{},q=await db.collection('attempts').where('studentId','==',studentId).get(),a=q.docs.map(d=>d.data());
+  let out=`विद्यार्थी विवरण\nनाम: ${st.name||''}\nUsername: ${st.username||''}\nवर्ग: ${st.className||''}\n\nपरीक्षा रिकॉर्ड\n`+a.map(x=>`${x.examName} | ${x.examCode} | ${x.correct}/${x.total} | ${x.percent}% | ${fmtSec(x.elapsed)} | ${x.createdAt?.toDate?.().toLocaleString('en-IN')||''}`).join('\n');
+  downloadFile('student-detail-'+(st.username||'student')+'.txt',out,'text/plain;charset=utf-8');
+}
+async function attemptDetails(id){let d=(await db.collection('attempts').doc(id).get()).data();$('teacherView').innerHTML=`<section class="glass p-5"><button class="btn border" onclick="teacherMerit()">Back</button><h2 class="text-xl font-black mt-3">${esc(d.studentName)} · ${esc(d.examName)}</h2>${d.questionSnapshot.map((q,i)=>{let a=d.answers[i];return `<div class="border rounded-xl p-4 mt-3"><b>Q${i+1}. ${renderMath(q.text)}</b><p>Your: ${a==null?'Not answered':esc(q.options[a])}</p><p>Correct: ${esc(q.options[q.answer])}</p><p class="font-bold ${a===q.answer?'text-green-600':'text-red-600'}">${a===q.answer?'Correct':'Wrong'}</p>${q.image?`<img src="${esc(q.image)}" class="max-h-48 mt-2">`:''}</div>`}).join('')}</section>`}
+async function deleteAttempt(id){if(confirm('इस student attempt को delete करें?')){await db.collection('attempts').doc(id).delete();teacherMerit()}}
+async function studentsAdmin(){let q=await db.collection('students').get();let a=q.docs.map(d=>({id:d.id,...d.data()}));$('teacherView').innerHTML=`<section class="glass p-5"><h2 class="text-xl font-black">Student Accounts</h2><p class="text-sm text-slate-500">Passwords plain-text में नहीं दिखाए जाते; जरूरत पर reset करें।</p><div class="tablewrap mt-4"><table class="w-full"><thead><tr class="border-b text-left"><th>Name</th><th>Username</th><th>Class</th><th>Created</th><th>Action</th></tr></thead><tbody>${a.map(x=>`<tr class="border-b"><td>${esc(x.name)}</td><td>${esc(x.username)}</td><td>${esc(x.className)}</td><td>${x.createdAt?.toDate?.().toLocaleDateString('en-IN')||''}</td><td><button class="btn border" onclick="resetStudent('${x.id}')">Reset Password</button></td></tr>`).join('')}</tbody></table></div></section>`}
+async function teacherMessages(){let q=await db.collection('students').where('active','==',true).get();let a=q.docs.map(d=>({id:d.id,...d.data()}));$('teacherView').innerHTML=`<section class="glass p-5"><h2 class="text-xl font-black">💬 Student Messages</h2><p class="text-sm text-slate-500 mt-1">किसी विद्यार्थी को चुनकर WhatsApp-जैसी चैट खोलें।</p><div class="grid md:grid-cols-3 gap-3 mt-4">${a.map(x=>`<button class="text-left border rounded-xl p-3 hover:bg-slate-50" onclick="openTeacherChat('${x.id}')"><b>${esc(x.name)}</b><div class="text-xs text-slate-500">@${esc(x.username)} · ${esc(x.className)}</div></button>`).join('')}</div><div id="teacherChatBox" class="mt-5"></div></section>`}
+async function openTeacherChat(studentId){let st=(await db.collection('students').doc(studentId).get()).data();let q=await db.collection('messages').where('studentId','==',studentId).where('teacherId','==',auth.currentUser.uid).get();let msgs=q.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));$('teacherChatBox').innerHTML=`<div class="border rounded-2xl overflow-hidden"><div class="bg-slate-100 p-3 font-bold">${esc(st.name)} · ${esc(st.className)}</div><div class="p-3 h-80 overflow-auto space-y-2 bg-white">${msgs.map(m=>`<div class="flex ${m.sender==='teacher'?'justify-end':'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-2 ${m.sender==='teacher'?'bg-blue-600 text-white':'bg-slate-100'}">${esc(m.text)}<div class="text-[10px] opacity-70 mt-1">${m.createdAt?.toDate?.().toLocaleString('en-IN')||''}</div></div></div>`).join('')||'<p class="text-slate-500">अभी कोई संदेश नहीं।</p>'}</div><div class="p-3 border-t flex gap-2"><input id="teacherMsgInput" class="flex-1 border rounded-xl p-3" placeholder="Message लिखें..." onkeydown="if(event.key==='Enter')sendTeacherMessage(\'${studentId}\')"><button class="btn bg-blue-600 text-white" onclick="sendTeacherMessage('${studentId}')">Send</button></div></div>`}
+async function sendTeacherMessage(studentId){let t=$('teacherMsgInput')?.value.trim();if(!t)return;await db.collection('messages').add({studentId,teacherId:auth.currentUser.uid,teacherName:state.teacher.name,sender:'teacher',text:t,createdAt:firebase.firestore.FieldValue.serverTimestamp(),read:false});openTeacherChat(studentId)}
+async function teacherProfile(){
+  let d=await db.collection('teachers').doc(auth.currentUser.uid).get();d=d.data()||{};
+  $('teacherView').innerHTML=`<section class="glass p-5 max-w-2xl"><div class="flex justify-between items-center"><div><h2 class="text-2xl font-black">👤 शिक्षक प्रोफाइल</h2><p class="text-slate-500">फोटो, नाम और Login Password बदलें</p></div><button class="btn border" onclick="teacherDashboard()">← Dashboard</button></div>
+  <div class="mt-5 border rounded-2xl p-4 flex flex-wrap items-center gap-4"><div class="w-24 h-24 rounded-full overflow-hidden border-4 border-blue-500 bg-slate-100 flex items-center justify-center">${d.photoURL?`<img src="${esc(d.photoURL)}" class="w-full h-full object-cover">`:'👨‍🏫'}</div><div><b>शिक्षक प्रोफाइल फोटो (Gallery)</b><input id="tphoto" type="file" accept="image/*" class="block mt-2"><p class="text-xs text-slate-500">फोटो Firebase Storage में सुरक्षित रहेगी।</p></div></div>
+  <label class="block mt-5 font-bold">पंजीकृत Email<input value="${esc(d.email||auth.currentUser.email||'')}" disabled class="w-full border rounded-xl p-3 mt-1 bg-slate-100"></label>
+  <label class="block mt-3 font-bold">शिक्षक का नाम<input id="pn" value="${esc(d.name||'')}" class="w-full border rounded-xl p-3 mt-1"></label>
+  <button class="btn bg-blue-600 text-white mt-4" onclick="saveTeacherProfile()">💾 Save Profile</button>
+  <div class="border-t mt-6 pt-5"><h3 class="font-black text-lg">🔐 Login Password</h3><p class="text-sm text-slate-500">पुराना Password दिखाया नहीं जाता। नया Password सेट करने के लिए वर्तमान Password की पुष्टि होगी।</p><button class="btn bg-violet-600 text-white mt-3" onclick="changeTeacherPassword()">🔑 Password बदलें</button><button class="btn border mt-3 ml-2" onclick="teacherForgotPassword()">📧 Forgot Password / Reset Email</button></div></section>`;
+}
+async function saveTeacherProfile(){
+  let name=$('pn').value.trim();if(!name)return toast('नाम जरूरी है');
+  let photoURL=state.teacher.photoURL||'';
+  try{
+    let f=$('tphoto')?.files?.[0];
+    if(f){let ref=storage.ref('teacher-profiles/'+auth.currentUser.uid+'/'+Date.now()+'-'+f.name);await ref.put(f);photoURL=await ref.getDownloadURL()}
+    await db.collection('teachers').doc(auth.currentUser.uid).set({name,email:auth.currentUser.email,photoURL,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    state.teacher.name=name;state.teacher.photoURL=photoURL;toast('Profile updated');teacherDashboard();
+  }catch(e){toast('Profile save नहीं हुआ: '+(e.message||''))}
+}
+async function downloadMerit(){
+  let rows=[...document.querySelectorAll('table tbody tr')].map(r=>[...r.children].slice(0,9).map(c=>c.innerText.trim()));
+  let csv='\uFEFFRank,Student,Class,Exam,Code,Attempted,Correct,Wrong,Percentage\n'+rows.map(r=>r.map(csvCell).join(',')).join('\n');
+  downloadFile('merit-list.csv',csv,'text/csv;charset=utf-8');
+}
+function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
+function downloadFile(name,data,type='text/plain;charset=utf-8'){let blob=new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function downloadText(n,t){downloadFile(n,t,'text/plain;charset=utf-8')}
+async function editExamDummy(){}
+auth.onAuthStateChanged(u=>{if(u&&state.role==='teacher')teacherDashboard()});app();
+</script></body></html>
