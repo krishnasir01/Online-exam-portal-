@@ -1294,6 +1294,20 @@
             </div>
           </div>
 
+          <!-- ⚡ 100+ प्रश्न एक साथ पेस्ट करने वाला डिब्बा -->
+          <div class="bg-indigo-50 border-2 border-dashed border-indigo-200 p-5 rounded-3xl space-y-3 my-4">
+            <div>
+              <h3 class="font-black text-sm text-indigo-900">⚡ एक साथ 100+ प्रश्न यहाँ पेस्ट करें (गणित, भौतिकी, रसायन सूत्र समर्थित)</h3>
+              <p class="text-xs text-indigo-700">फॉर्मेट: 1. प्रश्न (A) विकल्प (B) विकल्प (C) विकल्प (D) विकल्प उत्तर: A</p>
+            </div>
+            <div class="space-y-2">
+              <textarea id="bulkTextInput" rows="5" placeholder="1. प्रश्न यहाँ लिखें...&#10;(A) विकल्प A&#10;(B) विकल्प B&#10;(C) विकल्प C&#10;(D) विकल्प D&#10;उत्तर: A" class="w-full p-3 border rounded-xl text-xs font-mono bg-white outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+              <button type="button" onclick="processBulkQuestions()" class="bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow transition">
+                ⚡ सभी प्रश्न लोड करें (Load All Questions)
+              </button>
+            </div>
+          </div>
+                  
           <div class="space-y-4" id="questionsContainer">
             ${ex.questions.map((q, i) => `
               <div class="bg-white p-5 rounded-3xl border space-y-3 relative shadow-sm" id="qBlock_${i}">
@@ -1368,7 +1382,62 @@
         if (ansEl) q.correctAnswer = Number(ansEl.value);
       });
     }
+   /* पेस्ट किए गए प्रश्नों को बॉक्स में भरने वाला कोड */
+function processBulkQuestions() {
+  const rawText = document.getElementById("bulkTextInput").value.trim();
+  if (!rawText) return alert("कृपया प्रश्न पेस्ट करें!");
 
+  syncBuilderInputs();
+  const qPattern = /(?:^|\n)\s*(?:(\d+)[\.\)]|Q\s*(\d+)[\.\:\-]?)\s+/gi;
+  const matches = [...rawText.matchAll(qPattern)];
+  let newQuestions = [];
+
+  if (matches.length > 0) {
+    for (let i = 0; i < matches.length; i++) {
+      const startIndex = matches[i].index;
+      const endIndex = (i + 1 < matches.length) ? matches[i + 1].index : rawText.length;
+      const block = rawText.substring(startIndex, endIndex).trim();
+      const lines = block.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+      if (lines.length >= 5) {
+        let qText = lines[0].replace(/^(\d+[\.\)]|Q\s*\d+[\.\:\-]?)\s*/i, "").trim();
+        let opts = ["", "", "", ""];
+        let ansIdx = 0;
+
+        for (let j = 1; j < lines.length; j++) {
+          const line = lines[j];
+          if (/^[\(\[]?[A1क][\)\.\:\-]/i.test(line)) opts[0] = line.replace(/^[\(\[]?[A1क][\)\.\:\-]\s*/i, "").trim();
+          else if (/^[\(\[]?[B2ख][\)\.\:\-]/i.test(line)) opts[1] = line.replace(/^[\(\[]?[B2ख][\)\.\:\-]\s*/i, "").trim();
+          else if (/^[\(\[]?[C3ग][\)\.\:\-]/i.test(line)) opts[2] = line.replace(/^[\(\[]?[C3ग][\)\.\:\-]\s*/i, "").trim();
+          else if (/^[\(\[]?[D4घ][\)\.\:\-]/i.test(line)) opts[3] = line.replace(/^[\(\[]?[D4घ][\)\.\:\-]\s*/i, "").trim();
+          else if (/^(Ans|उत्तर|Answer)[\s\:\-\.\=\(\[]+/i.test(line)) {
+            const clean = line.toUpperCase();
+            if (clean.includes("B") || clean.includes("2")) ansIdx = 1;
+            else if (clean.includes("C") || clean.includes("3")) ansIdx = 2;
+            else if (clean.includes("D") || clean.includes("4")) ansIdx = 3;
+          }
+        }
+        if (qText && opts[0] && opts[1]) {
+          newQuestions.push({ questionText: qText, photo: "", options: opts, correctAnswer: ansIdx });
+        }
+      }
+    }
+  }
+
+  if (newQuestions.length === 0) {
+    return alert("प्रश्नों का सही फॉर्मेट नहीं मिला! कृपया 1. प्रश्न और (A), (B), (C), (D) फॉर्मेट में पेस्ट करें।");
+  }
+
+  if (state.builderExam.questions.length === 1 && !state.builderExam.questions[0].questionText.trim()) {
+    state.builderExam.questions = newQuestions;
+  } else {
+    state.builderExam.questions = state.builderExam.questions.concat(newQuestions);
+  }
+
+  alert(`कुल ${newQuestions.length} प्रश्न लोड हो गए!`);
+  renderCreateExam(document.getElementById("app"));
+}
+    
     function handleQuestionPhotoUpload(e, i) {
       const f = e.target.files[0];
       if (!f) return;
