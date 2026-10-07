@@ -1205,16 +1205,33 @@
       navigate("create-exam");
     }
 
-    async function editExistingExam(id) {
-      const exams = await API.getExams();
-      const ex = exams.find(e => e.id === id);
-      if (!ex) return alert("परीक्षा नहीं मिली!");
-      state.builderExam = JSON.parse(JSON.stringify(ex));
-      if (!state.builderExam.classes && state.builderExam.class) {
-        state.builderExam.classes = [state.builderExam.class];
-      }
-      navigate("create-exam");
+     async function editExistingExam(id) {
+  const exams = await API.getExams();
+  // id या examCode दोनों से खोजना ताकि परीक्षा तुरंत मिल जाए
+  const ex = exams.find(e => String(e.id) === String(id) || String(e.examCode) === String(id));
+  
+  if (!ex) {
+    return alert("❌ परीक्षा लोड नहीं हो सकी! कृपया पेज रिफ्रेश करके दोबारा प्रयास करें।");
+  }
+
+  // पूरा डेटा कॉपी करना
+  state.builderExam = JSON.parse(JSON.stringify(ex));
+  
+  // वर्ग (classes) एरे को सही करना
+  if (!state.builderExam.classes && state.builderExam.class) {
+    state.builderExam.classes = state.builderExam.class.split(",").map(s => s.trim());
+  } else if (!Array.isArray(state.builderExam.classes)) {
+    state.builderExam.classes = ["Class 12 Science"];
+  }
+
+  // प्रश्नों की सूची सुरक्षित करना
+  if (!state.builderExam.questions || state.builderExam.questions.length === 0) {
+    state.builderExam.questions = [{ questionText: "", photo: "", options: ["", "", "", ""], correctAnswer: 0 }];
+  }
+
+  navigate("create-exam");
     }
+    
 
     function renderCreateExam(c) {
       const ex = state.builderExam;
@@ -1381,40 +1398,45 @@
     }
 
     async function saveExamWithLock() {
-      if (state.isPublishingLock) return;
-      syncBuilderInputs();
-      const ex = state.builderExam;
+  if (state.isPublishingLock) return;
+  syncBuilderInputs();
+  const ex = state.builderExam;
 
-      if (!ex.examName) return alert("कृपया परीक्षा का नाम भरें!");
-      if (!ex.examCode) return alert("कृपया यूनिक Exam Code भरें!");
-      if (!ex.subject) return alert("⚠️ विषय (Subject) भरना अनिवार्य है!");
-      if (!ex.classes || ex.classes.length === 0) return alert("कम से कम 1 वर्ग चुनें!");
+  if (!ex.examName) return alert("कृपया परीक्षा का नाम भरें!");
+  if (!ex.examCode) return alert("कृपया यूनिक Exam Code भरें!");
+  if (!ex.subject) return alert("⚠️ विषय (Subject) भरना अनिवार्य है!");
+  if (!ex.classes || ex.classes.length === 0) return alert("कम से कम 1 वर्ग चुनें!");
 
-      const all = await API.getExams();
-      const isDuplicate = all.some(e => 
-        e.id !== ex.id && 
-        ((e.examCode || "").toUpperCase() === ex.examCode || 
-         (e.examName.trim().toLowerCase() === ex.examName.trim().toLowerCase() && (e.subject || "").toLowerCase() === ex.subject.toLowerCase()))
-      );
+  const all = await API.getExams();
 
-      if (isDuplicate) {
-        return alert("❌ यह परीक्षा या कोड पहले से मौजूद है! एक कोड की दो परीक्षाएं नहीं हो सकतीं।");
-      }
+  // सुधार: एडिट करते समय अपनी खुद की ID को डुप्लीकेट चेक से बाहर रखना
+  const isDuplicate = all.some(e => {
+    const isSameExam = (ex.id && String(e.id) === String(ex.id)) || (e.createdTimestamp === ex.createdTimestamp);
+    if (isSameExam) return false;
+    return (e.examCode || "").toUpperCase() === ex.examCode.toUpperCase();
+  });
 
-      state.isPublishingLock = true;
-      const btn = document.getElementById("publishSubmitBtn");
-      if (btn) { btn.disabled = true; btn.innerText = "⏳ सुरक्षित हो रहा है..."; }
+  if (isDuplicate) {
+    return alert("❌ यह Exam Code किसी दूसरी परीक्षा में पहले से उपयोग हो रहा है! कृपया दूसरा कोड डालें।");
+  }
 
-      try {
-        await API.saveExam(ex);
-        alert("परीक्षा प्रकाशित हो गई!");
-        navigate("teacher-dash");
-      } catch (e) {
-        alert("त्रुटि: " + e.message);
-      } finally {
-        state.isPublishingLock = false;
-      }
-    }
+  state.isPublishingLock = true;
+  const btn = document.getElementById("publishSubmitBtn");
+  if (btn) { 
+    btn.disabled = true; 
+    btn.innerText = "⏳ बदलाव सुरक्षित हो रहे हैं..."; 
+  }
+
+  try {
+    await API.saveExam(ex);
+    alert("✅ परीक्षा में किए गए बदलाव सफलतापूर्वक सुरक्षित हो गए!");
+    navigate("teacher-dash");
+  } catch (e) {
+    alert("त्रुटि: " + e.message);
+  } finally {
+    state.isPublishingLock = false;
+  }
+        }
 
     function confirmMoveToTrash(id, name) {
       openModal("परीक्षा हटाएं?", `क्या आप "${name}" को हटाना चाहते हैं? यह 15 दिनों तक रीसायकल बिन में रहेगी।`, async () => {
