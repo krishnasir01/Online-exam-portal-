@@ -135,12 +135,13 @@
 
     let cropperInstance = null;
 
+    /* GitHub और HTML Editor दोनों पर काम करने वाला यूनिवर्सल स्टोरेज */
     function getStore(key) {
       try {
-        let data = JSON.parse(localStorage.getItem("sep_v5_" + key) || "null");
+        let data = JSON.parse(localStorage.getItem("sep_live_" + key) || "null");
         if (!data || data.length === 0) {
           const oldKeys = [
-            "sep_v4_" + key, "sep_v3_" + key, "sep_v2_" + key, "sep_data_" + key, "sep_store_" + key,
+            "sep_v5_" + key, "sep_v4_" + key, "sep_v3_" + key, "sep_v2_" + key, "sep_data_" + key, "sep_store_" + key,
             "sep_cached_" + key + "_" + (state.activeTeacher?.id || ""),
             "sep_cached_exams_TCHR_DEFAULT"
           ];
@@ -149,7 +150,7 @@
               let oldVal = JSON.parse(localStorage.getItem(ok) || "[]");
               if (Array.isArray(oldVal) && oldVal.length > 0) {
                 data = oldVal;
-                localStorage.setItem("sep_v5_" + key, JSON.stringify(data));
+                localStorage.setItem("sep_live_" + key, JSON.stringify(data));
                 break;
               }
             } catch(e) {}
@@ -160,7 +161,7 @@
     }
 
     function setStore(key, data) {
-      try { localStorage.setItem("sep_v5_" + key, JSON.stringify(data || [])); } catch (e) {}
+      try { localStorage.setItem("sep_live_" + key, JSON.stringify(data || [])); } catch (e) {}
     }
 
     const API = {
@@ -174,6 +175,7 @@
           return true;
         });
 
+        // क्लाउड सिंक: यदि Firestore से डेटा मिलता है तो स्वतः स्थानीय रूप से मर्ज करें
         db.collection("exams").get().then(snap => {
           if (!snap.empty) {
             const cloudList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -640,7 +642,7 @@
             </div>
           </div>
 
-          <!-- उपलब्ध परीक्षाएं व फ़िल्टर (कीबोर्ड न भागने वाला सर्च) -->
+          <!-- उपलब्ध परीक्षाएं व फ़िल्टर (स्थिर कीबोर्ड सर्च) -->
           <div class="bg-white p-5 rounded-3xl border space-y-4">
             <div class="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
               <h3 class="font-black text-sm text-slate-800" id="availableExamsHeader">उपलब्ध परीक्षाएं</h3>
@@ -784,7 +786,6 @@
 
       c.innerHTML = `
         <div class="space-y-4 pb-16 student-exam-math">
-          <!-- टॉप स्टिकी बार (लाइव रनिंग टाइमर) -->
           <div class="bg-white/95 backdrop-blur-md p-3.5 rounded-2xl border shadow-sm sticky top-14 z-30 flex flex-wrap justify-between items-center gap-2">
             <div>
               ${ex.instituteName ? `<div class="text-xs font-black text-indigo-700 tracking-wider">${ex.instituteName}</div>` : ''}
@@ -803,7 +804,6 @@
             </div>
           </div>
 
-          <!-- प्रश्न सूची -->
           <div class="space-y-4">
             ${ex.questions.map((q, i) => `
               <div class="bg-white p-5 rounded-2xl border space-y-3 transition" id="qBox_${i}">
@@ -1038,6 +1038,7 @@
       printWin.focus();
       setTimeout(() => printWin.print(), 1000);
     }
+    /* शिक्षक लॉगिन - पहले से भरा हुआ हटाया गया */
     function renderTeacherLogin(c) {
       c.innerHTML = `
         <div class="max-w-sm mx-auto bg-white p-6 rounded-3xl border shadow-sm space-y-4">
@@ -1048,11 +1049,11 @@
           <div class="space-y-3 text-xs">
             <div>
               <label class="font-bold">ईमेल (Email ID)</label>
-              <input type="email" id="tEmail" value="krishnasir01@gmail.com" class="w-full p-2.5 border rounded-xl mt-1 font-bold outline-none" />
+              <input type="email" id="tEmail" placeholder="अपना ईमेल दर्ज करें" class="w-full p-2.5 border rounded-xl mt-1 font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
             <div>
               <label class="font-bold">पासवर्ड</label>
-              <input type="password" id="tPass" value="123456" class="w-full p-2.5 border rounded-xl mt-1 font-bold outline-none" />
+              <input type="password" id="tPass" placeholder="••••••••" class="w-full p-2.5 border rounded-xl mt-1 font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
           </div>
           <button onclick="handleTeacherLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow text-xs">
@@ -1065,11 +1066,14 @@
     function handleTeacherLogin() {
       const email = document.getElementById("tEmail").value.trim().toLowerCase();
       const pass = document.getElementById("tPass").value.trim();
-      const savedAuth = JSON.parse(localStorage.getItem("teacher_auth_" + email)) || { name: "Krishna Kumar", password: pass, photo: "", bgPhoto: "", institute: "Swami Vivekananda Educational Institute" };
+
+      if (!email || !pass) return alert("कृपया ईमेल और पासवर्ड दोनों भरें!");
+
+      const savedAuth = JSON.parse(localStorage.getItem("teacher_auth_" + email)) || { name: email.split("@")[0], password: pass, photo: "", bgPhoto: "", institute: "" };
 
       const teacher = {
         id: "TCHR_" + btoa(unescape(encodeURIComponent(email))).substring(0, 10),
-        name: savedAuth.name || "Krishna Kumar",
+        name: savedAuth.name || email.split("@")[0],
         email: email,
         photo: savedAuth.photo || "",
         bgPhoto: savedAuth.bgPhoto || "",
@@ -1187,7 +1191,7 @@
     function startNewExamCreation() {
       state.builderExam = {
         teacherId: state.activeTeacher.id,
-        instituteName: state.activeTeacher.institute || "Swami Vivekananda Educational Institute",
+        instituteName: "",
         examName: "",
         classes: ["Class 12 Science", "Class 12 Arts"],
         subject: "",
@@ -1236,7 +1240,8 @@
             <div class="grid md:grid-cols-2 gap-3 text-xs">
               <div>
                 <label class="font-bold text-indigo-700">संस्थान का नाम (Institute Name)</label>
-                <input type="text" id="bInstitute" value="${ex.instituteName || ''}" placeholder="उदा. स्वामी विवेकानंद शैक्षणिक संस्थान" class="w-full p-2.5 border rounded-xl mt-1 font-bold" />
+                <!-- पहले से लिखा हुआ हटाया गया -->
+                <input type="text" id="bInstitute" value="${ex.instituteName || ''}" placeholder="उदा. संस्थान का नाम लिखें" class="w-full p-2.5 border rounded-xl mt-1 font-bold" />
               </div>
               <div>
                 <label class="font-bold text-slate-700">Exam Name *</label>
@@ -1282,7 +1287,7 @@
 
                 <textarea id="qText_${i}" placeholder="प्रश्न यहाँ लिखें..." class="w-full p-3 border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500">${q.questionText}</textarea>
 
-                <!-- गैलरी से डायग्राम / फ़ोटो जोड़ने की सुविधा -->
+                <!-- गैलरी से डायग्राम फ़ोटो चुनने का सीधा विकल्प -->
                 <div class="bg-slate-50 p-3 rounded-xl border flex flex-wrap items-center gap-3">
                   <input type="file" id="qPhotoInput_${i}" accept="image/*" onchange="handleQuestionPhotoUpload(event, ${i})" class="hidden" />
                   <button type="button" onclick="document.getElementById('qPhotoInput_${i}').click()" class="bg-white px-3 py-1.5 border border-indigo-200 rounded-lg text-xs font-bold text-indigo-700 flex items-center gap-1.5 shadow-sm hover:bg-indigo-50">
@@ -1438,7 +1443,6 @@
             </div>
           </div>
 
-          <!-- सर्च बार व नए/पुराने पहले बटन -->
           <div class="bg-white p-4 rounded-2xl border space-y-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="text-xs font-bold text-slate-700">क्रमबद्ध करें (Sort):</span>
@@ -1451,7 +1455,6 @@
             <input type="text" id="mLiveSearchInp" oninput="filterMeritRealtime()" placeholder="🔍 विषय, परीक्षा का नाम, परीक्षा कोड या विद्यार्थी के नाम से खोजें..." class="w-full p-2.5 border rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
 
-          <!-- टेबल कंटेनर -->
           <div id="meritAreaBox" class="bg-white p-4 rounded-2xl border shadow-sm overflow-x-auto">
             <table class="w-full text-xs text-left merit-table border-collapse">
               <thead class="bg-slate-100 text-slate-700 font-bold">
@@ -1531,7 +1534,6 @@
       `).join("");
     }
 
-    /* मेरिट लिस्ट का संपूर्ण PDF डाउनलोड */
     function downloadMeritListPDF() {
       const el = document.getElementById("meritAreaBox");
       if (!el) return;
@@ -1647,7 +1649,7 @@
           <div class="space-y-3 text-xs">
             <div>
               <label class="font-bold">संस्थान का नाम (Institute Name)</label>
-              <input type="text" id="tpInst" value="${t.institute || ''}" class="w-full p-2.5 border rounded-xl mt-1 font-bold" />
+              <input type="text" id="tpInst" value="${t.institute || ''}" placeholder="संस्थान का नाम लिखें" class="w-full p-2.5 border rounded-xl mt-1 font-bold" />
             </div>
             <div>
               <label class="font-bold">शिक्षक का नाम (Name)</label>
