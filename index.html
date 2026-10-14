@@ -258,29 +258,35 @@ const firebaseConfig = {
         try { await db.collection("students").doc(username.toUpperCase()).delete(); } catch(e) {}
       },
 
-      async getExams() {
+            async getExams() {
         let local = getStore("exams");
         const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
         const now = Date.now();
 
-        local = local.filter(e => {
-          if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
-          return true;
-        });
-
-        db.collection("exams").get().then(snap => {
+        try {
+          // Firebase क्लाउड से परीक्षाएँ मँगवाएं
+          const snap = await db.collection("exams").get();
           if (!snap.empty) {
             const cloudList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             const merged = new Map();
             local.forEach(e => merged.set(e.id || e.examCode, e));
             cloudList.forEach(e => merged.set(e.id || e.examCode, e));
-            setStore("exams", Array.from(merged.values()));
+            local = Array.from(merged.values());
+            setStore("exams", local);
           }
-        }).catch(() => {});
+        } catch (e) {
+          console.warn("Firestore offline/fallback to local:", e);
+        }
+
+        // डिलीट की गई 15 दिन पुरानी परीक्षाओं को हटाना
+        local = local.filter(e => {
+          if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
+          return true;
+        });
 
         return local;
       },
-
+      
       async getExamByCode(code) {
         const clean = (code || "").trim().toUpperCase();
         const exams = await this.getExams();
@@ -1417,24 +1423,30 @@ const firebaseConfig = {
     }
 
     /* शून्य लैग वाला शिक्षक डैशबोर्ड */
-    function renderTeacherDashboard(c) {
+        async function renderTeacherDashboard(c) {
       if (!state.activeTeacher) return navigate("teacher-login");
 
-      const isOwner = state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME;
+      // ओनर की पहचान: चाहे role owner हो, या कोई भी Krishna Sir का यूजरनेम हो
+      const currentU = (state.activeTeacher.username || "").toUpperCase();
+      const isOwner = state.activeTeacher.role === "owner" || 
+                      currentU.includes("KRISHNA") || 
+                      currentU === "OWNER.KRISHNASIR" || 
+                      currentU === "OWNER_KRISHNA";
       
-      let allExams = getStore("exams");
-      let results = getStore("results");
-      let students = getStore("students");
-      let teachers = getStore("teachers");
-
-      API.getExams().then(exs => { allExams = exs; });
-      API.getResults().then(res => { results = res; });
-      API.getStudents().then(stus => { students = stus; });
-      API.getTeachers().then(tchs => { teachers = tchs; });
+      // क्लाउड और लोकल दोनों से ताज़ा परीक्षाएँ लोड करें
+      const allExams = await API.getExams();
+      const results = await API.getResults();
+      const students = await API.getStudents();
+      const teachers = await API.getTeachers();
 
       let currentExams = allExams.filter(e => !e.isDeleted);
+
+      // अगर सामान्य शिक्षक है, तभी फ़िल्टर करें; ओनर को अपनी और सबकी परीक्षाएँ हमेशा दिखेंगी
       if (!isOwner) {
-        currentExams = currentExams.filter(e => String(e.teacherId) === String(state.activeTeacher.id) || (e.teacherUsername && e.teacherUsername.toUpperCase() === state.activeTeacher.username.toUpperCase()));
+        currentExams = currentExams.filter(e => 
+          String(e.teacherId) === String(state.activeTeacher.id) || 
+          (e.teacherUsername && e.teacherUsername.toUpperCase() === currentU)
+        );
       } else if (state.ownerInspectTeacherId) {
         currentExams = currentExams.filter(e => String(e.teacherId) === String(state.ownerInspectTeacherId));
       }
@@ -1542,8 +1554,8 @@ const firebaseConfig = {
           </div>
         </div>
       `;
-    }
-
+      }
+                
     async function renderOwnerManageTeachers(c) {
       const teachers = await API.getTeachers();
       c.innerHTML = `
