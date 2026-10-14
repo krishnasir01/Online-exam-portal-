@@ -114,9 +114,9 @@
     }
     const db = firebase.firestore();
 
-    const OWNER_USERNAME = "OWNER_KRISHNA";
-    const OWNER_PASSWORD = "Owner@2026";
-    const OWNER_EMAIL = "krishnasir01@gmail.com";
+    const OWNER_USERNAME = "OWNER.KRISHNASIR";
+    const OWNER_PASSWORD = "krishna@289";
+    const OWNER_EMAIL = "krishnakumar926390@gmail.com";
 
     let state = {
       view: "student-login",
@@ -140,19 +140,32 @@
 
     let cropperInstance = null;
 
+    // सटीक तारीख और समय निकालने वाला फ़ंक्शन (Audit Timestamp)
+    function getJoinTimestamp() {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString("hi-IN", { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const timeStr = now.toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      return {
+        joinedDate: dateStr,
+        joinedTime: timeStr,
+        joinedFull: `${dateStr} | ${timeStr}`,
+        joinedTimestamp: Date.now()
+      };
+    }
+
     function getStore(key) {
       try {
-        let data = JSON.parse(localStorage.getItem("sep_main_" + key) || "null");
+        let data = JSON.parse(localStorage.getItem("sep_final_" + key) || "null");
         if (!data || data.length === 0) {
           const oldKeys = [
-            "sep_v8_" + key, "sep_v7_" + key, "sep_v6_" + key, "sep_live_" + key, "sep_v5_" + key, "sep_store_" + key
+            "sep_main_" + key, "sep_v8_" + key, "sep_v7_" + key, "sep_v6_" + key, "sep_live_" + key, "sep_v5_" + key, "sep_store_" + key
           ];
           for (let ok of oldKeys) {
             try {
               let oldVal = JSON.parse(localStorage.getItem(ok) || "[]");
               if (Array.isArray(oldVal) && oldVal.length > 0) {
                 data = oldVal;
-                localStorage.setItem("sep_main_" + key, JSON.stringify(data));
+                localStorage.setItem("sep_final_" + key, JSON.stringify(data));
                 break;
               }
             } catch(e) {}
@@ -163,14 +176,16 @@
     }
 
     function setStore(key, data) {
-      try { localStorage.setItem("sep_main_" + key, JSON.stringify(data || [])); } catch (e) {}
+      try { localStorage.setItem("sep_final_" + key, JSON.stringify(data || [])); } catch (e) {}
     }
 
     const API = {
-      // कभी भी स्क्रीन को खाली (सफेद) न होने देने वाला शिक्षक लोडर
       async getTeachers() {
         let local = getStore("teachers");
-        if (!local.some(t => t.role === "owner" || t.username === OWNER_USERNAME)) {
+        // पुराना OWNER_KRISHNA हटाकर केवल आपका OWNER.KRISHNASIR रखना
+        local = local.filter(t => t.username !== "OWNER_KRISHNA");
+
+        if (!local.some(t => t.role === "owner" || t.username.toUpperCase() === OWNER_USERNAME.toUpperCase())) {
           local.unshift({
             id: "TCHR_OWNER",
             name: "Krishna Kumar (Owner)",
@@ -179,19 +194,21 @@
             email: OWNER_EMAIL,
             role: "owner",
             status: "approved",
-            institute: ""
+            institute: "",
+            joinedFull: "14/10/2026 | 11:23:00 AM",
+            joinedTimestamp: Date.now()
           });
           setStore("teachers", local);
         }
 
-        // बैकग्राउंड में सिंक (बिना स्क्रीन अटकाए)
         db.collection("teachers").get().then(snap => {
           if (!snap.empty) {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             const merged = new Map();
             local.forEach(t => merged.set(t.username.toUpperCase(), t));
             list.forEach(t => merged.set(t.username.toUpperCase(), t));
-            setStore("teachers", Array.from(merged.values()));
+            let finalList = Array.from(merged.values()).filter(t => t.username !== "OWNER_KRISHNA");
+            setStore("teachers", finalList);
           }
         }).catch(() => {});
 
@@ -366,7 +383,7 @@
         localStorage.setItem("sep_notice", JSON.stringify({ text, timestamp: Date.now() }));
       }
     };
-        function navigate(v) {
+    function navigate(v) {
       state.view = v;
       sessionStorage.setItem("sep_view", v);
       renderApp();
@@ -474,16 +491,29 @@
     }
 
     async function handleStudentLogin() {
-      const u = document.getElementById("stuLogUser").value.trim().toUpperCase();
+      const u = document.getElementById("stuLogUser").value.trim().replace(/\s+/g, '').toUpperCase();
       const p = document.getElementById("stuLogPass").value.trim();
 
       if (!u || !p) return alert("कृपया यूज़रनेम और पासवर्ड दोनों भरें!");
       
+      const btn = event.target;
+      btn.innerText = "जाँच हो रही है...";
+      btn.disabled = true;
+
       const students = await API.getStudents();
-      const match = students.find(s => s.username.toUpperCase() === u);
+      btn.innerText = "लॉगिन करें (Enter Portal) →";
+      btn.disabled = false;
+
+      // शिक्षक आईडी से छात्र पोर्टल में लॉगिन रोकने की सुरक्षा
+      const teachers = await API.getTeachers();
+      if (teachers.some(t => t.username.replace(/\s+/g, '').toUpperCase() === u)) {
+        return alert("⚠️ यह शिक्षक (Teacher) यूज़रनेम है!\n\nकृपया ऊपर दिए गए 'Teacher Login' बटन से लॉगिन करें।");
+      }
+
+      const match = students.find(s => s.username.replace(/\s+/g, '').toUpperCase() === u);
 
       if (!match) return alert("❌ यह यूज़रनेम पंजीकृत नहीं है! कृपया पहले 'नया खाता बनाएँ'।");
-      if (match.password !== p) return alert("❌ गलत पासवर्ड! कृपया सही पासवर्ड डालें या 'पासवर्ड भूल गए' पर क्लिक करें।");
+      if (String(match.password).trim() !== String(p).trim()) return alert("❌ गलत पासवर्ड! कृपया सही पासवर्ड डालें या 'पासवर्ड भूल गए' पर क्लिक करें।");
 
       state.activeStudent = match;
       localStorage.setItem("sep_student", JSON.stringify(match));
@@ -556,12 +586,25 @@
         return alert("❌ यह यूज़रनेम पहले से मौजूद है! कृपया कोई दूसरा यूज़रनेम चुनें।");
       }
 
-      const newStudent = { name, sClass, roll, username, password, createdAt: new Date().toLocaleDateString("hi-IN") };
+      const joinTimeInfo = getJoinTimestamp();
+
+      const newStudent = { 
+        name, 
+        sClass, 
+        roll, 
+        username, 
+        password, 
+        joinedDate: joinTimeInfo.joinedDate,
+        joinedTime: joinTimeInfo.joinedTime,
+        joinedFull: joinTimeInfo.joinedFull,
+        joinedTimestamp: joinTimeInfo.joinedTimestamp
+      };
+
       await API.saveStudent(newStudent);
       state.activeStudent = newStudent;
       localStorage.setItem("sep_student", JSON.stringify(newStudent));
       state.selectedClassFilter = sClass;
-      alert("खाता बन गया! अब आप किसी भी मोबाइल से लॉगिन कर सकते हैं।");
+      alert(`खाता बन गया!\nपंजीकरण समय: ${joinTimeInfo.joinedFull}`);
       navigate("student-dashboard");
     }
 
@@ -671,7 +714,7 @@
       if (matches.length > 0) {
         alert("मिले हुए यूज़रनेम:\n" + matches.map(m => `• ${m.name}: ${m.username}`).join("\n"));
       } else alert("❌ इस पासवर्ड से कोई खाता नहीं मिला! नीचे विकल्प 3 से शिक्षक को समस्या भेजें।");
-        }
+      }
           async function renderStudentDashboard(c) {
       if (!state.activeStudent) return navigate("student-login");
 
@@ -717,6 +760,7 @@
             </div>
           </div>
 
+          <!-- दी गई परीक्षाओं का विवरण - PDF डाउनलोड विकल्प सहित -->
           <div class="bg-white p-4 rounded-2xl border space-y-2">
             <div class="flex justify-between items-center cursor-pointer" onclick="document.getElementById('myExamHistoryList').classList.toggle('hidden')">
               <h3 class="font-bold text-xs text-indigo-700 flex items-center gap-1.5">
@@ -745,6 +789,7 @@
             </div>
           </div>
 
+          <!-- उपलब्ध परीक्षाएं व फ़िल्टर (स्थिर कीबोर्ड सर्च) -->
           <div class="bg-white p-5 rounded-3xl border space-y-4">
             <div class="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
               <h3 class="font-black text-sm text-slate-800" id="availableExamsHeader">उपलब्ध परीक्षाएं</h3>
@@ -833,6 +878,7 @@
       `).join("");
     }
 
+    /* विद्यार्थी प्रोफाइल (Username & Password Change) */
     function renderStudentProfile(c) {
       const stu = state.activeStudent;
       c.innerHTML = `
@@ -899,7 +945,7 @@
       doc.close();
       printWin.focus();
       setTimeout(() => printWin.print(), 800);
-        }
+      }
           async function startStudentExamDirect(examCode) {
       const exam = await API.getExamByCode(examCode);
       if (!exam) return alert("परीक्षा नहीं मिली!");
@@ -1076,7 +1122,7 @@
       await API.submitResult(payload);
       state.lastResult = payload;
       navigate("student-result");
-      }
+        }
           function renderStudentResult(c) {
       const res = state.lastResult;
       const ex = state.activeStudentExam;
@@ -1191,7 +1237,7 @@
       doc.close();
       printWin.focus();
       setTimeout(() => printWin.print(), 1000);
-    }
+     }
           /* शिक्षक लॉगिन - यूज़रनेम और पासवर्ड से (कोई उदाहरण या प्री-फिल्ड नहीं) */
     function renderTeacherLogin(c) {
       c.innerHTML = `
@@ -1303,6 +1349,8 @@
         return alert("❌ यह यूज़रनेम पहले से किसी अन्य शिक्षक के पास है!");
       }
 
+      const joinTimeInfo = getJoinTimestamp();
+
       const reqTeacher = {
         id: "TCHR_" + btoa(unescape(encodeURIComponent(user))).substring(0, 10),
         name: name,
@@ -1311,11 +1359,15 @@
         password: pass,
         role: "teacher",
         status: "pending",
-        institute: ""
+        institute: "",
+        joinedDate: joinTimeInfo.joinedDate,
+        joinedTime: joinTimeInfo.joinedTime,
+        joinedFull: joinTimeInfo.joinedFull,
+        joinedTimestamp: joinTimeInfo.joinedTimestamp
       };
 
       await API.saveTeacher(reqTeacher);
-      alert("✅ आपका अनुरोध ओनर को भेज दिया गया है!\n\nओनर द्वारा स्वीकृत होते ही आप लॉगिन कर सकेंगे।");
+      alert(`✅ आपका अनुरोध भेज दिया गया है!\nपंजीकरण समय: ${joinTimeInfo.joinedFull}`);
       navigate("teacher-login");
     }
 
@@ -1363,7 +1415,7 @@
       navigate("student-login");
     }
 
-    /* शून्य लैग वाला शिक्षक डैशबोर्ड (ताकि रिफ्रेश पर स्क्रीन सफेद न रहे) */
+    /* शून्य लैग वाला शिक्षक डैशबोर्ड */
     function renderTeacherDashboard(c) {
       if (!state.activeTeacher) return navigate("teacher-login");
 
@@ -1374,7 +1426,6 @@
       let students = getStore("students");
       let teachers = getStore("teachers");
 
-      // बैकग्राउंड सिंक
       API.getExams().then(exs => { allExams = exs; });
       API.getResults().then(res => { results = res; });
       API.getStudents().then(stus => { students = stus; });
@@ -1426,7 +1477,7 @@
                 <button onclick="startNewExamCreation()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl shadow">+ Create Exam</button>
                 <button onclick="navigate('merit-list')" class="bg-amber-600 text-white px-3 py-2 rounded-xl shadow">🏆 Merit List</button>
                 <button onclick="navigate('teacher-trash')" class="bg-rose-50 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl">🗑️ रीसायकल बिन</button>
-                <button onclick="openChatModal()" class="bg-emerald-600 text-white px-3 py-2 rounded-xl shadow">💬 चैट (${API.getChats().length})</button>
+                ${isOwner ? `<button onclick="openChatModal()" class="bg-emerald-600 text-white px-3 py-2 rounded-xl shadow">💬 चैट (${API.getChats().length})</button>` : ''}
               </div>
             </div>
           </div>
@@ -1440,7 +1491,11 @@
 
           <div class="grid grid-cols-3 gap-3 text-center">
             <div class="bg-white p-4 rounded-2xl border"><span class="text-xs text-slate-500 font-bold block">सक्रिय परीक्षाएं</span><span class="text-2xl font-black text-indigo-600">${currentExams.length}</span></div>
-            <div class="bg-white p-4 rounded-2xl border cursor-pointer hover:bg-slate-50" onclick="navigate('teacher-students')"><span class="text-xs text-slate-500 font-bold block">पंजीकृत विद्यार्थी</span><span class="text-2xl font-black text-teal-600">${students.length}</span></div>
+            <div class="bg-white p-4 rounded-2xl border ${isOwner ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}" ${isOwner ? 'onclick="navigate(\'teacher-students\')"' : ''}>
+              <span class="text-xs text-slate-500 font-bold block">पंजीकृत विद्यार्थी</span>
+              <span class="text-2xl font-black text-teal-600">${students.length}</span>
+              ${!isOwner ? '<span class="text-[9px] text-slate-400 block mt-0.5">🔒 केवल ओनर हेतु</span>' : ''}
+            </div>
             <div class="bg-white p-4 rounded-2xl border"><span class="text-xs text-slate-500 font-bold block">कुल टेस्ट रिकॉर्ड</span><span class="text-2xl font-black text-amber-600">${results.length}</span></div>
           </div>
 
@@ -1504,28 +1559,38 @@
             <h3 class="font-bold text-xs text-slate-700">सभी शिक्षक खाते (${teachers.length})</h3>
             <div class="space-y-2.5">
               ${teachers.map(t => {
-                const isHead = t.role === "owner";
+                const isHead = t.role === "owner" || t.username.toUpperCase() === OWNER_USERNAME.toUpperCase();
                 const isPending = t.status === "pending";
+                const hasGlobalMerit = Boolean(t.canViewGlobalMerit);
                 return `
                   <div class="p-3 border rounded-xl flex flex-wrap justify-between items-center text-xs ${isPending ? 'bg-amber-50/70 border-amber-300' : 'bg-slate-50'} gap-2">
                     <div>
                       <div class="flex items-center gap-1.5">
-                        <b class="text-slate-800">${t.name}</b>${isHead ? '<span class="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded">OWNER</span>' : ''}
+                        <b class="text-slate-800">${t.name}</b>
+                        ${isHead ? '<span class="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded">OWNER</span>' : ''}
                         ${isPending ? '<span class="text-[9px] bg-rose-500 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">अनुमोदन बाकी (Pending)</span>' : '<span class="text-[9px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded">सक्रिय (Approved)</span>'}
                       </div>
                       <span class="block text-slate-600 font-mono text-[11px] mt-0.5">
                         Username: <b class="text-indigo-700">${t.username}</b> | पासवर्ड: <b class="text-emerald-700">${t.password}</b> | ईमेल: ${t.email || 'N/A'}
                       </span>
+                      <span class="block text-slate-500 font-mono text-[10px] mt-0.5">
+                        🕒 जुड़ने का समय: <b>${t.joinedFull || 'N/A'}</b>
+                      </span>
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       ${isPending ? `
                         <button onclick="approveTeacherAccount('${t.username}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl font-bold text-[11px] shadow">
                           ✓ स्वीकृत करें (Approve)
                         </button>
                       ` : `
-                         <button onclick="state.ownerInspectTeacherId='${t.id}'; navigate('teacher-dash');" class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-xl font-bold text-[11px]">
+                        <button onclick="state.ownerInspectTeacherId='${t.id}'; navigate('teacher-dash');" class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-xl font-bold text-[11px]">
                           🔍 परीक्षाएँ देखें
                         </button>
+                        ${!isHead ? `
+                          <button onclick="toggleTeacherGlobalMerit('${t.username}')" class="px-2.5 py-1.5 rounded-xl font-bold text-[11px] border ${hasGlobalMerit ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-slate-100 text-slate-700 border-slate-300'}">
+                            ${hasGlobalMerit ? '🌐 सभी की मेरिट बंद करें' : '🌐 सभी की मेरिट अनुमति दें'}
+                          </button>
+                        ` : ''}
                       `}
                       ${!isHead ? `
                         <button onclick="confirmDeleteTeacherAccount('${t.username}')" class="bg-rose-50 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-xl font-bold text-[11px]">
@@ -1540,6 +1605,18 @@
           </div>
         </div>
       `;
+    }
+
+    async function toggleTeacherGlobalMerit(username) {
+      const teachers = await API.getTeachers();
+      const t = teachers.find(x => x.username.toUpperCase() === username.toUpperCase());
+      if (!t) return alert("शिक्षक नहीं मिला!");
+
+      t.canViewGlobalMerit = !Boolean(t.canViewGlobalMerit);
+      await API.saveTeacher(t);
+
+      alert(`शिक्षक '${t.name}' के लिए अन्य/सभी शिक्षकों की मेरिट लिस्ट देखने की अनुमति ${t.canViewGlobalMerit ? '✅ चालू कर दी गई है!' : '❌ बंद कर दी गई है!'}`);
+      renderOwnerManageTeachers(document.getElementById("app"));
     }
 
     async function approveTeacherAccount(user) {
@@ -1862,198 +1939,7 @@
         renderApp();
       });
     }
-
-    async function renderMeritList(c) {
-      c.innerHTML = `
-        <div class="max-w-5xl mx-auto space-y-4">
-          <div class="flex flex-wrap justify-between items-center bg-white p-4 rounded-2xl border shadow-sm gap-2">
-            <div>
-              <h2 class="font-black text-amber-600 text-base">🏆 Merit List (मेरिट सूची)</h2>
-              <p class="text-[11px] text-slate-400">सभी विद्यार्थियों का तुलनात्मक परिणाम</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button onclick="downloadElementAsImage('meritAreaBox', 'Merit_List')" class="bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow flex items-center gap-1">
-                🖼️ फोटो डाउनलोड
-              </button>
-              <button onclick="downloadMeritListPDF()" class="bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow flex items-center gap-1">
-                📑 PDF डाउनलोड
-              </button>
-              <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
-            </div>
-          </div>
-
-          <div class="bg-white p-4 rounded-2xl border space-y-3">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-xs font-bold text-slate-700">क्रमबद्ध करें (Sort):</span>
-              <div class="flex gap-2 text-xs">
-                <button onclick="state.meritSortOrder = 'az'; filterMeritRealtime();" id="mSortAZ" class="px-3 py-1.5 border rounded-xl font-bold bg-indigo-600 text-white">नए पहले (A-Z)</button>
-                <button onclick="state.meritSortOrder = 'za'; filterMeritRealtime();" id="mSortZA" class="px-3 py-1.5 border rounded-xl font-bold bg-slate-50 text-slate-600">पुराने पहले (Z-A)</button>
-              </div>
-            </div>
-
-            <input type="text" id="mLiveSearchInp" oninput="filterMeritRealtime()" placeholder="🔍 विषय, परीक्षा का नाम, परीक्षा कोड या विद्यार्थी के नाम से खोजें..." class="w-full p-2.5 border rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-
-          <div id="meritAreaBox" class="bg-white p-4 rounded-2xl border shadow-sm overflow-x-auto">
-            <table class="w-full text-xs text-left merit-table border-collapse">
-              <thead class="bg-slate-100 text-slate-700 font-bold">
-                <tr>
-                  <th class="text-center w-12">रैंक</th>
-                  <th>विद्यार्थी का नाम</th>
-                  <th>वर्ग व रोल</th>
-                  <th>परीक्षा नाम व कोड</th>
-                  <th>विषय</th>
-                  <th>प्राप्तांक</th>
-                  <th>प्रतिशत</th>
-                  <th>लगा समय</th>
-                  <th>तारीख</th>
-                  <th class="text-center w-12">हटाएं</th>
-                </tr>
-              </thead>
-              <tbody id="meritTableBody"></tbody>
-            </table>
-          </div>
-        </div>
-      `;
-      filterMeritRealtime();
-    }
-
-    async function filterMeritRealtime() {
-      const tbody = document.getElementById("meritTableBody");
-      const inp = document.getElementById("mLiveSearchInp");
-      if (!tbody) return;
-
-      const q = inp ? inp.value.toLowerCase().trim() : "";
-      const allResults = await API.getResults();
-      let list = allResults.slice();
-
-      if (q) {
-        list = list.filter(r => 
-          (r.studentName || "").toLowerCase().includes(q) || 
-          (r.examName || "").toLowerCase().includes(q) || 
-          (r.examCode || "").toLowerCase().includes(q) || 
-          (r.subject || "").toLowerCase().includes(q)
-        );
-      }
-
-      if (state.meritSortOrder === "az") {
-        list.sort((a, b) => (b.createdTimestamp || 0) - (a.createdTimestamp || 0));
-        document.getElementById("mSortAZ")?.classList.replace("bg-slate-50", "bg-indigo-600");
-        document.getElementById("mSortAZ")?.classList.replace("text-slate-600", "text-white");
-        document.getElementById("mSortZA")?.classList.replace("bg-indigo-600", "bg-slate-50");
-        document.getElementById("mSortZA")?.classList.replace("text-white", "text-slate-600");
-      } else {
-        list.sort((a, b) => (a.createdTimestamp || 0) - (b.createdTimestamp || 0));
-         document.getElementById("mSortZA")?.classList.replace("bg-slate-50", "bg-indigo-600");
-        document.getElementById("mSortZA")?.classList.replace("text-slate-600", "text-white");
-        document.getElementById("mSortAZ")?.classList.replace("bg-indigo-600", "bg-slate-50");
-        document.getElementById("mSortAZ")?.classList.replace("text-white", "text-slate-600");
-      }
-
-      if (list.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-slate-400">कोई परिणाम उपलब्ध नहीं है</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = list.map((r, i) => `
-        <tr class="${i === 0 ? 'bg-amber-50/50' : 'hover:bg-slate-50'}">
-          <td class="text-center font-black ${i === 0 ? 'text-amber-600' : ''}">#${i+1}</td>
-          <td class="font-bold text-slate-800">${r.studentName}</td>
-          <td>${r.studentClass} (${r.rollNumber || 'N/A'})</td>
-          <td>${r.examName} <span class="font-mono text-indigo-700 block text-[10px]">(${r.examCode})</span></td>
-          <td class="font-semibold text-slate-600">${r.subject || 'सामान्य'}</td>
-          <td class="font-black text-indigo-700">${r.marks} / ${r.totalMarks}</td>
-          <td class="font-bold text-emerald-600">${r.percentage}%</td>
-          <td class="font-mono text-slate-700">${r.timeTaken || 'N/A'}</td>
-          <td>${r.date}</td>
-          <td class="text-center">
-            <button onclick="API.deleteResult('${r.id}').then(() => filterMeritRealtime())" class="text-rose-500 hover:text-rose-700 p-1"><i class="fa-solid fa-trash"></i></button>
-          </td>
-        </tr>
-      `).join("");
-    }
-
-    function downloadMeritListPDF() {
-      const el = document.getElementById("meritAreaBox");
-      if (!el) return;
-      const printWin = window.open('', '', 'width=950,height=700');
-      const doc = printWin.document;
-      doc.open();
-      doc.write('<!DOCTYPE html><html><head><title>Merit List</title><script src="https://cdn.tailwindcss.com"><\/script><style>.merit-table th, .merit-table td { border: 1px solid #94a3b8; padding: 6px 8px; }</style></head><body class="p-6">');
-      doc.write('<div class="text-center border-b pb-3 mb-4"><h1 class="text-xl font-bold">Smart Exam Portal - Merit List</h1><p class="text-xs text-slate-500">तारीख: ' + new Date().toLocaleDateString("hi-IN") + '</p></div>');
-      doc.write(el.innerHTML);
-      doc.write('</body></html>');
-      doc.close();
-      printWin.focus();
-      setTimeout(() => printWin.print(), 800);
-    }
-
-    async function renderTeacherStudents(c) {
-      const students = await API.getStudents();
-      c.innerHTML = `
-        <div class="space-y-4">
-          <div class="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
-            <h2 class="font-black text-slate-800 text-sm md:text-base">👥 पंजीकृत विद्यार्थी डेटाबेस (${students.length})</h2>
-            <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
-          </div>
-          <div class="bg-white rounded-2xl border overflow-x-auto p-4">
-            <table class="w-full text-xs text-left merit-table border-collapse">
-              <thead class="bg-slate-100 font-bold">
-                <tr>
-                  <th>विद्यार्थी का नाम</th>
-                  <th>वर्ग</th>
-                  <th>रोल नं.</th>
-                  <th>यूज़रनेम</th>
-                  <th>पासवर्ड</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${students.length === 0 ? '<tr><td colspan="5" class="p-4 text-center text-slate-400">कोई विद्यार्थी पंजीकृत नहीं है</td></tr>' : students.map(s => `
-                  <tr>
-                    <td class="font-bold text-slate-800">${s.name}</td>
-                    <td>${s.sClass}</td>
-                    <td>${s.roll || 'N/A'}</td>
-                    <td class="font-mono font-bold text-indigo-700">${s.username}</td>
-                    <td class="font-mono text-emerald-700 font-bold">${s.password}</td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-    }
-
-    async function renderTeacherTrash(c) {
-      const exams = await API.getExams();
-      const trash = exams.filter(e => e.isDeleted);
-
-      c.innerHTML = `
-        <div class="max-w-2xl mx-auto space-y-4">
-          <div class="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
-            <div>
-              <h2 class="font-black text-rose-600 text-sm">🗑️ रीसायकल बिन (15 दिन सुरक्षा)</h2>
-              <p class="text-[11px] text-slate-400">15 दिन बाद परीक्षाएं स्वतः परमानेंट हट जाएंगी</p>
-            </div>
-            <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
-          </div>
-          <div class="bg-white rounded-2xl border p-4 space-y-2.5">
-            ${trash.length === 0 ? '<p class="text-xs text-slate-400 py-6 text-center">रीसायकल बिन खाली है।</p>' : trash.map(t => `
-              <div class="flex justify-between items-center p-3 border rounded-xl bg-rose-50/40 text-xs">
-                <div>
-                  <b class="text-slate-800 block">${t.examName} (${t.examCode})</b>
-                  <span class="text-[10px] text-slate-400">डिलीट हुआ: ${t.deletedDate || 'हाल ही में'}</span>
-                </div>
-                <button onclick="API.restoreExam('${t.id}').then(() => renderTeacherTrash(document.getElementById('app')))" class="bg-emerald-600 text-white px-3 py-1.5 rounded-xl font-bold shadow">
-                  ⟲ वापस लाएँ (Restore)
-                </button>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      `;
-    }
-
+        /* शिक्षक प्रोफ़ाइल - यूज़रनेम, पासवर्ड, ईमेल व बैनर बदलना */
     function renderTeacherProfile(c) {
       const t = state.activeTeacher;
       c.innerHTML = `
@@ -2179,6 +2065,256 @@
       renderTeacherProfile(document.getElementById("app"));
     }
 
+    /* मेरिट लिस्ट - खुद का हमेशा, दूसरों का ओनर की अनुमति से */
+    async function renderMeritList(c) {
+      const isOwner = state.activeTeacher && (state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME);
+
+      c.innerHTML = `
+        <div class="max-w-5xl mx-auto space-y-4">
+          <div class="flex flex-wrap justify-between items-center bg-white p-4 rounded-2xl border shadow-sm gap-2">
+            <div>
+              <h2 class="font-black text-amber-600 text-base">🏆 Merit List (मेरिट सूची)</h2>
+              <p class="text-[11px] text-slate-400">तुलनात्मक परिणाम तालिका</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="downloadElementAsImage('meritAreaBox', 'Merit_List')" class="bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow flex items-center gap-1">
+                🖼️ फोटो डाउनलोड
+              </button>
+              <button onclick="downloadMeritListPDF()" class="bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow flex items-center gap-1">
+                📑 PDF डाउनलोड
+              </button>
+              <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
+            </div>
+          </div>
+
+          ${!isOwner ? `
+            <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-800 font-bold flex items-center justify-between">
+              <span>📌 आप अपनी बनाई हुई परीक्षाओं की मेरिट लिस्ट देख रहे हैं।</span>
+            </div>
+          ` : ''}
+
+          <div class="bg-white p-4 rounded-2xl border space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs font-bold text-slate-700">क्रमबद्ध करें (Sort):</span>
+              <div class="flex gap-2 text-xs">
+                <button onclick="state.meritSortOrder = 'az'; filterMeritRealtime();" id="mSortAZ" class="px-3 py-1.5 border rounded-xl font-bold bg-indigo-600 text-white">नए पहले (A-Z)</button>
+                <button onclick="state.meritSortOrder = 'za'; filterMeritRealtime();" id="mSortZA" class="px-3 py-1.5 border rounded-xl font-bold bg-slate-50 text-slate-600">पुराने पहले (Z-A)</button>
+              </div>
+            </div>
+
+            <input type="text" id="mLiveSearchInp" oninput="filterMeritRealtime()" placeholder="🔍 विषय, परीक्षा का नाम, परीक्षा कोड या विद्यार्थी के नाम से खोजें..." class="w-full p-2.5 border rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+
+          <div id="meritAreaBox" class="bg-white p-4 rounded-2xl border shadow-sm overflow-x-auto">
+            <table class="w-full text-xs text-left merit-table border-collapse">
+              <thead class="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th class="text-center w-12">रैंक</th>
+                  <th>विद्यार्थी का नाम</th>
+                  <th>वर्ग व रोल</th>
+                  <th>परीक्षा नाम व कोड</th>
+                  <th>विषय</th>
+                  <th>प्राप्तांक</th>
+                  <th>प्रतिशत</th>
+                  <th>लगा समय</th>
+                  <th>तारीख</th>
+                  <th class="text-center w-12">हटाएं</th>
+                </tr>
+              </thead>
+              <tbody id="meritTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      filterMeritRealtime();
+    }
+
+    async function filterMeritRealtime() {
+      const tbody = document.getElementById("meritTableBody");
+      const inp = document.getElementById("mLiveSearchInp");
+      if (!tbody) return;
+
+      const isOwner = state.activeTeacher && (state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME);
+      const q = inp ? inp.value.toLowerCase().trim() : "";
+      const allResults = await API.getResults();
+      let list = allResults.slice();
+
+      if (!isOwner && state.activeTeacher) {
+        const teachers = await API.getTeachers();
+        const currentT = teachers.find(t => t.username.toUpperCase() === state.activeTeacher.username.toUpperCase());
+        const canSeeGlobal = currentT && Boolean(currentT.canViewGlobalMerit);
+
+        if (!canSeeGlobal) {
+          const myExams = await API.getExams();
+          const myExamCodes = new Set(
+            myExams
+              .filter(e => String(e.teacherId) === String(state.activeTeacher.id) || 
+                           (e.teacherUsername && e.teacherUsername.toUpperCase() === state.activeTeacher.username.toUpperCase()))
+              .map(e => (e.examCode || "").toUpperCase())
+          );
+          list = list.filter(r => myExamCodes.has((r.examCode || "").toUpperCase()));
+        }
+      }
+
+      if (q) {
+        list = list.filter(r => 
+          (r.studentName || "").toLowerCase().includes(q) || 
+          (r.examName || "").toLowerCase().includes(q) || 
+          (r.examCode || "").toLowerCase().includes(q) || 
+          (r.subject || "").toLowerCase().includes(q)
+        );
+      }
+
+      if (state.meritSortOrder === "az") {
+        list.sort((a, b) => (b.createdTimestamp || 0) - (a.createdTimestamp || 0));
+        document.getElementById("mSortAZ")?.classList.replace("bg-slate-50", "bg-indigo-600");
+        document.getElementById("mSortAZ")?.classList.replace("text-slate-600", "text-white");
+        document.getElementById("mSortZA")?.classList.replace("bg-indigo-600", "bg-slate-50");
+        document.getElementById("mSortZA")?.classList.replace("text-white", "text-slate-600");
+      } else {
+        list.sort((a, b) => (a.createdTimestamp || 0) - (b.createdTimestamp || 0));
+        document.getElementById("mSortZA")?.classList.replace("bg-slate-50", "bg-indigo-600");
+        document.getElementById("mSortZA")?.classList.replace("text-slate-600", "text-white");
+        document.getElementById("mSortAZ")?.classList.replace("bg-indigo-600", "bg-slate-50");
+        document.getElementById("mSortAZ")?.classList.replace("text-white", "text-slate-600");
+      }
+
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-slate-400">कोई परिणाम उपलब्ध नहीं है</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = list.map((r, i) => `
+        <tr class="${i === 0 ? 'bg-amber-50/50' : 'hover:bg-slate-50'}">
+          <td class="text-center font-black ${i === 0 ? 'text-amber-600' : ''}">#${i+1}</td>
+          <td class="font-bold text-slate-800">${r.studentName}</td>
+          <td>${r.studentClass} (${r.rollNumber || 'N/A'})</td>
+          <td>${r.examName} <span class="font-mono text-indigo-700 block text-[10px]">(${r.examCode})</span></td>
+          <td class="font-semibold text-slate-600">${r.subject || 'सामान्य'}</td>
+          <td class="font-black text-indigo-700">${r.marks} / ${r.totalMarks}</td>
+          <td class="font-bold text-emerald-600">${r.percentage}%</td>
+          <td class="font-mono text-slate-700">${r.timeTaken || 'N/A'}</td>
+          <td>${r.date}</td>
+          <td class="text-center">
+            ${isOwner ? `
+              <button onclick="API.deleteResult('${r.id}').then(() => filterMeritRealtime())" class="text-rose-500 hover:text-rose-700 p-1 font-bold" title="डिलीट करें">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            ` : '<span class="text-slate-300">-</span>'}
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function downloadMeritListPDF() {
+      const el = document.getElementById("meritAreaBox");
+      if (!el) return;
+      const printWin = window.open('', '', 'width=950,height=700');
+      const doc = printWin.document;
+      doc.open();
+      doc.write('<!DOCTYPE html><html><head><title>Merit List</title><script src="https://cdn.tailwindcss.com"><\/script><style>.merit-table th, .merit-table td { border: 1px solid #94a3b8; padding: 6px 8px; }</style></head><body class="p-6">');
+      doc.write('<div class="text-center border-b pb-3 mb-4"><h1 class="text-xl font-bold">Smart Exam Portal - Merit List</h1><p class="text-xs text-slate-500">तारीख: ' + new Date().toLocaleDateString("hi-IN") + '</p></div>');
+      doc.write(el.innerHTML);
+      doc.write('</body></html>');
+      doc.close();
+      printWin.focus();
+      setTimeout(() => printWin.print(), 800);
+    }
+
+    /* पंजीकृत विद्यार्थी डेटाबेस - डिलीट बटन व जुड़ने का समय */
+    async function renderTeacherStudents(c) {
+      if (!state.activeTeacher) return navigate("teacher-login");
+      const isOwner = state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME;
+      
+      if (!isOwner) {
+        alert("🔒 यह अधिकार केवल पोर्टल के मुख्य ओनर के पास है।");
+        return navigate("teacher-dash");
+      }
+
+      const students = await API.getStudents();
+      c.innerHTML = `
+        <div class="space-y-4">
+          <div class="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
+            <div>
+              <h2 class="font-black text-slate-800 text-sm md:text-base">👥 पंजीकृत विद्यार्थी डेटाबेस (${students.length})</h2>
+              <p class="text-xs text-slate-500">सभी विद्यार्थियों के जुड़ने का समय व विवरण</p>
+            </div>
+            <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
+          </div>
+          <div class="bg-white rounded-2xl border overflow-x-auto p-4">
+            <table class="w-full text-xs text-left merit-table border-collapse">
+              <thead class="bg-slate-100 font-bold">
+                <tr>
+                  <th>विद्यार्थी का नाम</th>
+                  <th>वर्ग</th>
+                  <th>रोल नं.</th>
+                  <th>यूज़रनेम</th>
+                  <th>पासवर्ड</th>
+                  <th>जुड़ने की तारीख व समय</th>
+                  <th class="text-center w-16">हटाएं</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${students.length === 0 ? '<tr><td colspan="7" class="p-4 text-center text-slate-400">कोई विद्यार्थी पंजीकृत नहीं है</td></tr>' : students.map(s => `
+                  <tr>
+                    <td class="font-bold text-slate-800">${s.name}</td>
+                    <td>${s.sClass}</td>
+                    <td>${s.roll || 'N/A'}</td>
+                    <td class="font-mono font-bold text-indigo-700">${s.username}</td>
+                    <td class="font-mono text-emerald-700 font-bold">${s.password}</td>
+                    <td class="font-mono text-slate-600 font-semibold">${s.joinedFull || 'N/A'}</td>
+                    <td class="text-center">
+                      <button onclick="confirmDeleteStudentRecord('${s.username}', '${s.name}')" class="text-rose-600 hover:text-rose-800 p-1 font-bold" title="विद्यार्थी हटाएं">
+                        <i class="fa-solid fa-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function confirmDeleteStudentRecord(username, name) {
+      openModal("विद्यार्थी हटाएं?", `क्या आप विद्यार्थी "${name}" (${username}) का खाता पूरी तरह हटाना चाहते हैं?`, async () => {
+        await API.deleteStudent(username);
+        alert("विद्यार्थी खाता हटा दिया गया!");
+        renderTeacherStudents(document.getElementById("app"));
+      });
+    }
+
+    async function renderTeacherTrash(c) {
+      const exams = await API.getExams();
+      const trash = exams.filter(e => e.isDeleted);
+
+      c.innerHTML = `
+        <div class="max-w-2xl mx-auto space-y-4">
+          <div class="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
+            <div>
+              <h2 class="font-black text-rose-600 text-sm">🗑️ रीसायकल बिन (15 दिन सुरक्षा)</h2>
+              <p class="text-[11px] text-slate-400">15 दिन बाद परीक्षाएं स्वतः परमानेंट हट जाएंगी</p>
+            </div>
+            <button onclick="navigate('teacher-dash')" class="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-xl font-bold">← Dashboard</button>
+          </div>
+          <div class="bg-white rounded-2xl border p-4 space-y-2.5">
+            ${trash.length === 0 ? '<p class="text-xs text-slate-400 py-6 text-center">रीसायकल बिन खाली है।</p>' : trash.map(t => `
+              <div class="flex justify-between items-center p-3 border rounded-xl bg-rose-50/40 text-xs">
+                <div>
+                  <b class="text-slate-800 block">${t.examName} (${t.examCode})</b>
+                  <span class="text-[10px] text-slate-400">डिलीट हुआ: ${t.deletedDate || 'हाल ही में'}</span>
+                </div>
+                <button onclick="API.restoreExam('${t.id}').then(() => renderTeacherTrash(document.getElementById('app')))" class="bg-emerald-600 text-white px-3 py-1.5 rounded-xl font-bold shadow">
+                ⟲ वापस लाएँ (Restore)
+                </button>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }
+
     async function downloadTeacherPaperPDF(examId) {
       const exams = await API.getExams();
       const ex = exams.find(e => e.id === examId);
@@ -2218,9 +2354,10 @@
       const navArea = document.getElementById("navAuthArea");
 
       if (state.activeTeacher) {
+        const isOwner = state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME;
         navArea.innerHTML = `
           <button onclick="navigate('teacher-dash')" class="text-xs bg-indigo-800 text-white px-2.5 py-1.5 rounded-xl font-bold">👨‍🏫 डैशबोर्ड</button>
-          <button onclick="openChatModal()" class="text-xs bg-emerald-600 text-white px-2.5 py-1.5 rounded-xl font-bold">💬 चैट</button>
+          ${isOwner ? `<button onclick="openChatModal()" class="text-xs bg-emerald-600 text-white px-2.5 py-1.5 rounded-xl font-bold">💬 चैट</button>` : ''}
           <button onclick="handleTeacherLogout()" class="text-xs bg-rose-600 text-white px-2.5 py-1.5 rounded-xl font-bold">Logout</button>
         `;
       } else if (state.activeStudent) {
@@ -2258,7 +2395,7 @@
       }
     }
 
-    // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना
+    // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना (Zero-Lag Guarantee)
     window.addEventListener("DOMContentLoaded", () => {
       const p = new URLSearchParams(window.location.search).get("exam");
       if (p) {
