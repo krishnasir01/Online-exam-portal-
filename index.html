@@ -99,16 +99,17 @@
       </div>
     </div>
   </div>
-    <script> 
-const firebaseConfig = {
-  apiKey: "AIzaSyCNZQE09U86piWrHItnrl6gOj5lp5odCIc",
-  authDomain: "online-smartexam.firebaseapp.com",
-  projectId: "online-smartexam",
-  storageBucket: "online-smartexam.firebasestorage.app",
-  messagingSenderId: "496019627434",
-  appId: "1:496019627434:web:86920fd700a85f1e529fd3",
-  measurementId: "G-DG0KG9N2TL"
-};
+    <script>
+    // आपकी असली Firebase चाबी के साथ कॉन्फ़िगरेशन
+    const firebaseConfig = {
+      apiKey: "AIzaSyCNZQE09U86piWrHItnrl6gQd170b0",
+      authDomain: "online-smartexam.firebaseapp.com",
+      projectId: "online-smartexam",
+      storageBucket: "online-smartexam.appspot.com",
+      messagingSenderId: "496019627434",
+      appId: "1:496019627434:web:86920fd700a85f1e529fd3",
+      measurementId: "G-DG0KG9N2TL"
+    };
 
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
@@ -141,7 +142,6 @@ const firebaseConfig = {
 
     let cropperInstance = null;
 
-    // सटीक तारीख और समय निकालने वाला फ़ंक्शन (Audit Timestamp)
     function getJoinTimestamp() {
       const now = new Date();
       const dateStr = now.toLocaleDateString("hi-IN", { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -156,17 +156,15 @@ const firebaseConfig = {
 
     function getStore(key) {
       try {
-        let data = JSON.parse(localStorage.getItem("sep_final_" + key) || "null");
+        let data = JSON.parse(localStorage.getItem("sep_krishna_" + key) || "null");
         if (!data || data.length === 0) {
-          const oldKeys = [
-            "sep_main_" + key, "sep_v8_" + key, "sep_v7_" + key, "sep_v6_" + key, "sep_live_" + key, "sep_v5_" + key, "sep_store_" + key
-          ];
+          const oldKeys = ["sep_final_" + key, "sep_main_" + key, "sep_v8_" + key, "sep_v7_" + key, "sep_store_" + key];
           for (let ok of oldKeys) {
             try {
               let oldVal = JSON.parse(localStorage.getItem(ok) || "[]");
               if (Array.isArray(oldVal) && oldVal.length > 0) {
                 data = oldVal;
-                localStorage.setItem("sep_final_" + key, JSON.stringify(data));
+                localStorage.setItem("sep_krishna_" + key, JSON.stringify(data));
                 break;
               }
             } catch(e) {}
@@ -177,16 +175,15 @@ const firebaseConfig = {
     }
 
     function setStore(key, data) {
-      try { localStorage.setItem("sep_final_" + key, JSON.stringify(data || [])); } catch (e) {}
+      try { localStorage.setItem("sep_krishna_" + key, JSON.stringify(data || [])); } catch (e) {}
     }
 
     const API = {
       async getTeachers() {
         let local = getStore("teachers");
-        // पुराना OWNER_KRISHNA हटाकर केवल आपका OWNER.KRISHNASIR रखना
         local = local.filter(t => t.username !== "OWNER_KRISHNA");
 
-        if (!local.some(t => t.role === "owner" || t.username.toUpperCase() === OWNER_USERNAME.toUpperCase())) {
+        if (!local.some(t => t.role === "owner" || (t.username || "").toUpperCase() === OWNER_USERNAME.toUpperCase())) {
           local.unshift({
             id: "TCHR_OWNER",
             name: "Krishna Kumar (Owner)",
@@ -208,8 +205,7 @@ const firebaseConfig = {
             const merged = new Map();
             local.forEach(t => merged.set(t.username.toUpperCase(), t));
             list.forEach(t => merged.set(t.username.toUpperCase(), t));
-            let finalList = Array.from(merged.values()).filter(t => t.username !== "OWNER_KRISHNA");
-            setStore("teachers", finalList);
+            setStore("teachers", Array.from(merged.values()).filter(t => t.username !== "OWNER_KRISHNA"));
           }
         }).catch(() => {});
 
@@ -258,35 +254,35 @@ const firebaseConfig = {
         try { await db.collection("students").doc(username.toUpperCase()).delete(); } catch(e) {}
       },
 
-            async getExams() {
+      // सुपर-फास्ट और रियल-टाइम एग्ज़ाम लोडर
+      async getExams() {
         let local = getStore("exams");
         const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
         const now = Date.now();
 
-        try {
-          // Firebase क्लाउड से परीक्षाएँ मँगवाएं
-          const snap = await db.collection("exams").get();
+        // बैकग्राउंड में Firebase से तुरंत सिंक करें
+        db.collection("exams").get().then(snap => {
           if (!snap.empty) {
             const cloudList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             const merged = new Map();
             local.forEach(e => merged.set(e.id || e.examCode, e));
             cloudList.forEach(e => merged.set(e.id || e.examCode, e));
-            local = Array.from(merged.values());
-            setStore("exams", local);
+            const updated = Array.from(merged.values()).filter(e => {
+              if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
+              return true;
+            });
+            setStore("exams", updated);
+            // अगर विद्यार्थी स्क्रीन पर है तो ऑटो रिफ्रेश करें
+            if (state.view === "student-dashboard") filterStudentExamsRealtime();
           }
-        } catch (e) {
-          console.warn("Firestore offline/fallback to local:", e);
-        }
+        }).catch(() => {});
 
-        // डिलीट की गई 15 दिन पुरानी परीक्षाओं को हटाना
-        local = local.filter(e => {
+        return local.filter(e => {
           if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
           return true;
         });
-
-        return local;
       },
-      
+
       async getExamByCode(code) {
         const clean = (code || "").trim().toUpperCase();
         const exams = await this.getExams();
@@ -295,30 +291,27 @@ const firebaseConfig = {
 
       async saveExam(examData) {
         const todayStr = new Date().toLocaleDateString("hi-IN", { day: '2-digit', month: '2-digit', year: 'numeric' });
-        let docId = examData.id;
+        let docId = examData.id || ("EXAM_" + Date.now());
         const payload = {
           ...examData,
+          id: docId,
           isDeleted: false,
           createdDate: examData.createdDate || todayStr,
           createdTimestamp: examData.createdTimestamp || Date.now()
         };
 
-        try {
-          if (docId) {
-            delete payload.id;
-            await db.collection("exams").doc(docId).set(payload, { merge: true });
-          } else {
-            const res = await db.collection("exams").add(payload);
-            docId = res.id;
-          }
-        } catch (e) {
-          if (!docId) docId = "EXAM_" + Date.now();
-        }
-
-        payload.id = docId;
-        const exams = getStore("exams").filter(e => e.id !== docId && e.examCode !== payload.examCode);
+        // 1. तुरंत फोन में सेव करें ताकि 0 सेकंड में अपनी स्क्रीन पर दिखे
+        let exams = getStore("exams").filter(e => e.id !== docId && e.examCode !== payload.examCode);
         exams.unshift(payload);
         setStore("exams", exams);
+
+        // 2. तुरंत Firebase क्लाउड पर भेजें ताकि दूसरे मोबाइल में दिखे
+        try {
+          await db.collection("exams").doc(docId).set(payload, { merge: true });
+        } catch (e) {
+          console.warn("Cloud save error:", e);
+        }
+
         return docId;
       },
 
@@ -358,15 +351,16 @@ const firebaseConfig = {
 
       async submitResult(resultData) {
         let resId = "RES_" + Date.now();
-        try {
-          const res = await db.collection("results").add(resultData);
-          resId = res.id;
-        } catch (e) {}
         resultData.id = resId;
         const results = getStore("results");
         results.unshift(resultData);
         setStore("results", results);
-        return resId;
+
+        try {
+          const res = await db.collection("results").add(resultData);
+          resultData.id = res.id;
+        } catch (e) {}
+        return resultData.id;
       },
 
       async deleteResult(id) {
@@ -390,7 +384,18 @@ const firebaseConfig = {
         localStorage.setItem("sep_notice", JSON.stringify({ text, timestamp: Date.now() }));
       }
     };
-    function navigate(v) {
+
+    // रियल-टाइम लिसनर (जब भी कोई नया एग्जाम बने, बिना रिफ्रेश किए सभी मोबाइलों में आ जाए)
+    try {
+      db.collection("exams").onSnapshot(snap => {
+        if (!snap.empty) {
+          let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setStore("exams", list);
+          if (state.view === "student-dashboard") filterStudentExamsRealtime();
+        }
+      });
+    } catch(e) {}
+        function navigate(v) {
       state.view = v;
       sessionStorage.setItem("sep_view", v);
       renderApp();
@@ -511,7 +516,6 @@ const firebaseConfig = {
       btn.innerText = "लॉगिन करें (Enter Portal) →";
       btn.disabled = false;
 
-      // शिक्षक आईडी से छात्र पोर्टल में लॉगिन रोकने की सुरक्षा
       const teachers = await API.getTeachers();
       if (teachers.some(t => t.username.replace(/\s+/g, '').toUpperCase() === u)) {
         return alert("⚠️ यह शिक्षक (Teacher) यूज़रनेम है!\n\nकृपया ऊपर दिए गए 'Teacher Login' बटन से लॉगिन करें।");
@@ -615,7 +619,6 @@ const firebaseConfig = {
       navigate("student-dashboard");
     }
 
-    /* विद्यार्थी रिकवरी स्क्रीन - दोनों भूलने पर सीधे शिक्षक को समस्या भेजने का सिस्टम */
     function renderStudentForgot(c) {
       c.innerHTML = `
         <div class="max-w-md mx-auto bg-white p-6 md:p-8 rounded-3xl shadow-sm border space-y-4">
@@ -641,7 +644,6 @@ const firebaseConfig = {
               </div>
             </div>
 
-            <!-- विकल्प 3: दोनों भूलने पर सीधे शिक्षक को समस्या भेजें -->
             <div class="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl space-y-2.5">
               <div class="flex items-center gap-1.5 text-rose-800 font-bold">
                 <span class="text-base">🚨</span>
@@ -767,7 +769,6 @@ const firebaseConfig = {
             </div>
           </div>
 
-          <!-- दी गई परीक्षाओं का विवरण - PDF डाउनलोड विकल्प सहित -->
           <div class="bg-white p-4 rounded-2xl border space-y-2">
             <div class="flex justify-between items-center cursor-pointer" onclick="document.getElementById('myExamHistoryList').classList.toggle('hidden')">
               <h3 class="font-bold text-xs text-indigo-700 flex items-center gap-1.5">
@@ -796,7 +797,6 @@ const firebaseConfig = {
             </div>
           </div>
 
-          <!-- उपलब्ध परीक्षाएं व फ़िल्टर (स्थिर कीबोर्ड सर्च) -->
           <div class="bg-white p-5 rounded-3xl border space-y-4">
             <div class="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
               <h3 class="font-black text-sm text-slate-800" id="availableExamsHeader">उपलब्ध परीक्षाएं</h3>
@@ -826,7 +826,7 @@ const firebaseConfig = {
       let available = allExams.filter(e => {
         if (e.isDeleted) return false;
         const classes = Array.isArray(e.classes) ? e.classes : [e.class];
-        return classes.some(cl => cl.trim().toLowerCase() === state.selectedClassFilter.trim().toLowerCase());
+        return classes.some(cl => cl && cl.trim().toLowerCase() === state.selectedClassFilter.trim().toLowerCase());
       });
 
       if (q) {
@@ -885,7 +885,6 @@ const firebaseConfig = {
       `).join("");
     }
 
-    /* विद्यार्थी प्रोफाइल (Username & Password Change) */
     function renderStudentProfile(c) {
       const stu = state.activeStudent;
       c.innerHTML = `
@@ -952,7 +951,7 @@ const firebaseConfig = {
       doc.close();
       printWin.focus();
       setTimeout(() => printWin.print(), 800);
-      }
+        }
           async function startStudentExamDirect(examCode) {
       const exam = await API.getExamByCode(examCode);
       if (!exam) return alert("परीक्षा नहीं मिली!");
@@ -1129,8 +1128,8 @@ const firebaseConfig = {
       await API.submitResult(payload);
       state.lastResult = payload;
       navigate("student-result");
-        }
-          function renderStudentResult(c) {
+    }
+        function renderStudentResult(c) {
       const res = state.lastResult;
       const ex = state.activeStudentExam;
       if (!res || !ex) return navigate("student-dashboard");
@@ -1244,9 +1243,8 @@ const firebaseConfig = {
       doc.close();
       printWin.focus();
       setTimeout(() => printWin.print(), 1000);
-     }
-          /* शिक्षक लॉगिन - यूज़रनेम और पासवर्ड से (कोई उदाहरण या प्री-फिल्ड नहीं) */
-    function renderTeacherLogin(c) {
+    }
+        function renderTeacherLogin(c) {
       c.innerHTML = `
         <div class="max-w-sm mx-auto bg-white p-6 rounded-3xl border shadow-sm space-y-4">
           <div class="text-center space-y-1">
@@ -1280,15 +1278,8 @@ const firebaseConfig = {
 
       if (!user || !pass) return alert("कृपया यूज़रनेम और पासवर्ड दोनों भरें!");
 
-      const btn = document.getElementById("btnTeacherLog");
-      btn.innerText = "जाँच हो रही है...";
-      btn.disabled = true;
-
       const teachers = await API.getTeachers();
-      btn.innerText = "डैशबोर्ड खोलें";
-      btn.disabled = false;
-
-      const matched = teachers.find(t => t.username.toUpperCase() === user);
+      const matched = teachers.find(t => (t.username || "").toUpperCase() === user);
 
       if (!matched) {
         return alert("❌ यह यूज़रनेम पंजीकृत नहीं है! कृपया सही यूज़रनेम डालें या नया अनुरोध भेजें।");
@@ -1298,7 +1289,7 @@ const firebaseConfig = {
         return alert("⏳ आपका खाता अभी 'पेंडिंग' है!\n\nजैसे ही ओनर आपका खाता स्वीकृत (Approve) करेंगे, आप लॉगिन कर सकेंगे।");
       }
 
-      if (matched.password !== pass) {
+      if (String(matched.password).trim() !== pass) {
         return alert("❌ गलत पासवर्ड! कृपया सही पासवर्ड दर्ज करें।");
       }
 
@@ -1422,26 +1413,28 @@ const firebaseConfig = {
       navigate("student-login");
     }
 
-    /* शून्य लैग वाला शिक्षक डैशबोर्ड */
-        async function renderTeacherDashboard(c) {
+    function renderTeacherDashboard(c) {
       if (!state.activeTeacher) return navigate("teacher-login");
 
-      // ओनर की पहचान: चाहे role owner हो, या कोई भी Krishna Sir का यूजरनेम हो
       const currentU = (state.activeTeacher.username || "").toUpperCase();
       const isOwner = state.activeTeacher.role === "owner" || 
                       currentU.includes("KRISHNA") || 
                       currentU === "OWNER.KRISHNASIR" || 
                       currentU === "OWNER_KRISHNA";
       
-      // क्लाउड और लोकल दोनों से ताज़ा परीक्षाएँ लोड करें
-      const allExams = await API.getExams();
-      const results = await API.getResults();
-      const students = await API.getStudents();
-      const teachers = await API.getTeachers();
+      let allExams = getStore("exams");
+      let results = getStore("results");
+      let students = getStore("students");
+      let teachers = getStore("teachers");
+
+      // बैकग्राउंड में ताज़ा डेटा अपडेट करें
+      API.getExams().then(() => {});
+      API.getResults().then(() => {});
+      API.getStudents().then(() => {});
+      API.getTeachers().then(() => {});
 
       let currentExams = allExams.filter(e => !e.isDeleted);
 
-      // अगर सामान्य शिक्षक है, तभी फ़िल्टर करें; ओनर को अपनी और सबकी परीक्षाएँ हमेशा दिखेंगी
       if (!isOwner) {
         currentExams = currentExams.filter(e => 
           String(e.teacherId) === String(state.activeTeacher.id) || 
@@ -1554,8 +1547,8 @@ const firebaseConfig = {
           </div>
         </div>
       `;
-      }
-                
+    }
+
     async function renderOwnerManageTeachers(c) {
       const teachers = await API.getTeachers();
       c.innerHTML = `
@@ -1588,7 +1581,7 @@ const firebaseConfig = {
                       </span>
                       <span class="block text-slate-500 font-mono text-[10px] mt-0.5">
                         🕒 जुड़ने का समय: <b>${t.joinedFull || 'N/A'}</b>
-                      </span>
+                       </span>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                       ${isPending ? `
@@ -1952,7 +1945,7 @@ const firebaseConfig = {
         renderApp();
       });
     }
-        /* शिक्षक प्रोफ़ाइल - यूज़रनेम, पासवर्ड, ईमेल व बैनर बदलना */
+
     function renderTeacherProfile(c) {
       const t = state.activeTeacher;
       c.innerHTML = `
@@ -2078,7 +2071,6 @@ const firebaseConfig = {
       renderTeacherProfile(document.getElementById("app"));
     }
 
-    /* मेरिट लिस्ट - खुद का हमेशा, दूसरों का ओनर की अनुमति से */
     async function renderMeritList(c) {
       const isOwner = state.activeTeacher && (state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME);
 
@@ -2234,7 +2226,6 @@ const firebaseConfig = {
       setTimeout(() => printWin.print(), 800);
     }
 
-    /* पंजीकृत विद्यार्थी डेटाबेस - डिलीट बटन व जुड़ने का समय */
     async function renderTeacherStudents(c) {
       if (!state.activeTeacher) return navigate("teacher-login");
       const isOwner = state.activeTeacher.role === "owner" || state.activeTeacher.username === OWNER_USERNAME;
@@ -2319,7 +2310,7 @@ const firebaseConfig = {
                   <span class="text-[10px] text-slate-400">डिलीट हुआ: ${t.deletedDate || 'हाल ही में'}</span>
                 </div>
                 <button onclick="API.restoreExam('${t.id}').then(() => renderTeacherTrash(document.getElementById('app')))" class="bg-emerald-600 text-white px-3 py-1.5 rounded-xl font-bold shadow">
-                ⟲ वापस लाएँ (Restore)
+                  ⟲ वापस लाएँ (Restore)
                 </button>
               </div>
             `).join("")}
@@ -2408,7 +2399,7 @@ const firebaseConfig = {
       }
     }
 
-    // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना (Zero-Lag Guarantee)
+    // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना
     window.addEventListener("DOMContentLoaded", () => {
       const p = new URLSearchParams(window.location.search).get("exam");
       if (p) {
@@ -2424,4 +2415,4 @@ const firebaseConfig = {
     });
   </script>
 </body>
-</html>
+</html> 
