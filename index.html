@@ -748,16 +748,17 @@
 
             <div class="bg-indigo-50 border-2 border-indigo-200 p-2.5 rounded-2xl flex items-center gap-2">
               <span class="text-xs font-black text-indigo-900">चयनित वर्ग:</span>
-              <select onchange="state.selectedClassFilter = this.value; filterStudentExamsRealtime();" class="bg-white border rounded-xl px-3 py-1.5 text-xs font-black text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm">
-                <option value="Class 12 Science" ${state.selectedClassFilter === 'Class 12 Science' ? 'selected' : ''}>Class 12 (Science)</option>
-                <option value="Class 12 Arts" ${state.selectedClassFilter === 'Class 12 Arts' ? 'selected' : ''}>Class 12 (Arts)</option>
-                <option value="Class 11 Science" ${state.selectedClassFilter === 'Class 11 Science' ? 'selected' : ''}>Class 11 (Science)</option>
-                <option value="Class 11 Arts" ${state.selectedClassFilter === 'Class 11 Arts' ? 'selected' : ''}>Class 11 (Arts)</option>
-                <option value="Class 10" ${state.selectedClassFilter === 'Class 10' ? 'selected' : ''}>Class 10</option>
-                <option value="Class 9" ${state.selectedClassFilter === 'Class 9' ? 'selected' : ''}>Class 9</option>
-                <option value="Class 8" ${state.selectedClassFilter === 'Class 8' ? 'selected' : ''}>Class 8</option>
-              </select>
-            </div>
+      <select onchange="state.selectedClassFilter = this.value; filterStudentExamsRealtime();" class="bg-white border rounded-xl px-3 py-1.5 text-xs font-black text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm">
+      <option value="All">🌟 सभी वर्ग (All Classes)</option>
+       <option value="Class 12 Science" ${state.selectedClassFilter === 'Class 12 Science' ? 'selected' : ''}>Class 12 (Science)</option>
+        <option value="Class 12 Arts" ${state.selectedClassFilter === 'Class 12 Arts' ? 'selected' : ''}>Class 12 (Arts)</option>
+        <option value="Class 11 Science" ${state.selectedClassFilter === 'Class 11 Science' ? 'selected' : ''}>Class 11 (Science)</option>
+        <option value="Class 11 Arts" ${state.selectedClassFilter === 'Class 11 Arts' ? 'selected' : ''}>Class 11 (Arts)</option>
+         <option value="Class 10" ${state.selectedClassFilter === 'Class 10' ? 'selected' : ''}>Class 10</option>
+         <option value="Class 9" ${state.selectedClassFilter === 'Class 9' ? 'selected' : ''}>Class 9</option>
+         <option value="Class 8" ${state.selectedClassFilter === 'Class 8' ? 'selected' : ''}>Class 8</option>
+         </select>
+        </div>
 
             <div class="flex gap-2">
               <button onclick="openChatModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow flex items-center gap-1.5">
@@ -815,20 +816,42 @@
       filterStudentExamsRealtime();
     }
 
-    async function filterStudentExamsRealtime() {
+        async function filterStudentExamsRealtime() {
       const grid = document.getElementById("studentExamsGrid");
       const inp = document.getElementById("stuExamSearchInp");
       if (!grid) return;
 
       const q = inp ? inp.value.toLowerCase().trim() : "";
-      const allExams = await API.getExams();
+      
+      // सीधे मेमोरी और Firebase दोनों से डेटा लेना
+      let allExams = await API.getExams();
+      if (!allExams || allExams.length === 0) {
+        allExams = getStore("exams");
+      }
+
+      // सुरक्षित और लचीला क्लास मिलान (Normalize strings)
+      const cleanFilter = (state.selectedClassFilter || "").toLowerCase().replace(/[^a-z0-9]/g, '');
 
       let available = allExams.filter(e => {
         if (e.isDeleted) return false;
-        const classes = Array.isArray(e.classes) ? e.classes : [e.class];
-        return classes.some(cl => cl && cl.trim().toLowerCase() === state.selectedClassFilter.trim().toLowerCase());
+        
+        // अगर 'All' चुना है या फ़िल्टर खाली है तो सब दिखाओ
+        if (!cleanFilter || cleanFilter === "all" || cleanFilter === "allclasses") return true;
+
+        const targetClasses = Array.isArray(e.classes) ? e.classes : (e.class ? e.class.split(",") : []);
+        
+        // अगर परीक्षा में कोई क्लास नहीं भरी गई है, तो भी सबको दिखाएँ
+        if (targetClasses.length === 0) return true;
+
+        return targetClasses.some(cl => {
+          if (!cl) return false;
+          const cleanTarget = String(cl).toLowerCase().replace(/[^a-z0-9]/g, '');
+          // 12 science, 12th science, class 12 science सब आपस में मैच होंगे
+          return cleanTarget.includes(cleanFilter) || cleanFilter.includes(cleanTarget);
+        });
       });
 
+      // सर्च बार फ़िल्टर
       if (q) {
         available = available.filter(e => 
           (e.examName || "").toLowerCase().includes(q) || 
@@ -837,25 +860,25 @@
         );
       }
 
+      // सॉर्टिंग
       if (state.examSortOrder === "az") {
         available.sort((a, b) => (b.createdTimestamp || 0) - (a.createdTimestamp || 0));
-        document.getElementById("btnSortAZ")?.classList.replace("bg-slate-50", "bg-indigo-600");
-        document.getElementById("btnSortAZ")?.classList.replace("text-slate-600", "text-white");
-        document.getElementById("btnSortZA")?.classList.replace("bg-indigo-600", "bg-slate-50");
-        document.getElementById("btnSortZA")?.classList.replace("text-white", "text-slate-600");
       } else {
         available.sort((a, b) => (a.createdTimestamp || 0) - (b.createdTimestamp || 0));
-        document.getElementById("btnSortZA")?.classList.replace("bg-slate-50", "bg-indigo-600");
-        document.getElementById("btnSortZA")?.classList.replace("text-slate-600", "text-white");
-        document.getElementById("btnSortAZ")?.classList.replace("bg-indigo-600", "bg-slate-50");
-        document.getElementById("btnSortAZ")?.classList.replace("text-white", "text-slate-600");
       }
 
       const header = document.getElementById("availableExamsHeader");
       if (header) header.innerText = `उपलब्ध परीक्षाएं (${available.length})`;
 
       if (available.length === 0) {
-        grid.innerHTML = '<p class="text-xs text-slate-400 py-8 col-span-2 text-center">इस वर्ग/सर्च के लिए अभी कोई परीक्षा उपलब्ध नहीं है।</p>';
+        grid.innerHTML = `
+          <div class="col-span-2 text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
+            <p class="text-xs text-slate-500 font-bold mb-2">इस चयनित वर्ग के लिए कोई परीक्षा नहीं मिली।</p>
+            <button onclick="state.selectedClassFilter = 'All'; filterStudentExamsRealtime();" class="text-xs bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl shadow">
+              सभी वर्गों की परीक्षाएँ देखें (Show All)
+            </button>
+          </div>
+        `;
         return;
       }
 
@@ -883,7 +906,7 @@
           </div>
         </div>
       `).join("");
-    }
+        } 
 
     function renderStudentProfile(c) {
       const stu = state.activeStudent;
