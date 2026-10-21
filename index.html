@@ -502,35 +502,64 @@
       `;
     }
 
-    async function handleStudentLogin() {
+     async function handleStudentLogin() {
       const u = document.getElementById("stuLogUser").value.trim().replace(/\s+/g, '').toUpperCase();
       const p = document.getElementById("stuLogPass").value.trim();
 
       if (!u || !p) return alert("कृपया यूज़रनेम और पासवर्ड दोनों भरें!");
       
       const btn = event.target;
+      const oldText = btn.innerText;
       btn.innerText = "जाँच हो रही है...";
       btn.disabled = true;
 
-      const students = await API.getStudents();
-      btn.innerText = "लॉगिन करें (Enter Portal) →";
-      btn.disabled = false;
+      try {
+        // 1. सीधे Firebase क्लाउड से लाइव छात्र डेटा मँगवाएं
+        let students = [];
+        try {
+          const snap = await db.collection("students").get();
+          if (!snap.empty) {
+            students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setStore("students", students);
+          }
+        } catch (err) {
+          console.warn("Cloud student fetch error:", err);
+        }
 
-      const teachers = await API.getTeachers();
-      if (teachers.some(t => t.username.replace(/\s+/g, '').toUpperCase() === u)) {
-        return alert("⚠️ यह शिक्षक (Teacher) यूज़रनेम है!\n\nकृपया ऊपर दिए गए 'Teacher Login' बटन से लॉगिन करें।");
+        // अगर क्लाउड धीमा है तो लोकल से मिलाएँ
+        if (students.length === 0) {
+          students = await API.getStudents();
+        }
+
+        btn.innerText = oldText;
+        btn.disabled = false;
+
+        const teachers = await API.getTeachers();
+        if (teachers.some(t => (t.username || '').replace(/\s+/g, '').toUpperCase() === u)) {
+          return alert("⚠️ यह शिक्षक (Teacher) यूज़रनेम है!\n\nकृपया ऊपर 'Teacher Login' बटन से लॉगिन करें।");
+        }
+
+        const match = students.find(s => (s.username || '').replace(/\s+/g, '').toUpperCase() === u);
+
+        if (!match) {
+          return alert("❌ यह यूज़रनेम पंजीकृत नहीं है! कृपया पहले 'नया खाता बनाएँ'।");
+        }
+        
+        if (String(match.password).trim() !== String(p).trim()) {
+          return alert("❌ गलत पासवर्ड! कृपया सही पासवर्ड दर्ज करें।");
+        }
+
+        state.activeStudent = match;
+        localStorage.setItem("sep_student", JSON.stringify(match));
+        state.selectedClassFilter = match.sClass || "Class 10";
+        navigate("student-dashboard");
+
+      } catch (e) {
+        btn.innerText = oldText;
+        btn.disabled = false;
+        alert("लॉगिन में त्रुटि: " + e.message);
       }
-
-      const match = students.find(s => s.username.replace(/\s+/g, '').toUpperCase() === u);
-
-      if (!match) return alert("❌ यह यूज़रनेम पंजीकृत नहीं है! कृपया पहले 'नया खाता बनाएँ'।");
-      if (String(match.password).trim() !== String(p).trim()) return alert("❌ गलत पासवर्ड! कृपया सही पासवर्ड डालें या 'पासवर्ड भूल गए' पर क्लिक करें।");
-
-      state.activeStudent = match;
-      localStorage.setItem("sep_student", JSON.stringify(match));
-      state.selectedClassFilter = match.sClass || "Class 12 Science";
-      navigate("student-dashboard");
-    }
+    } 
 
     function renderStudentSignup(c) {
       c.innerHTML = `
@@ -2423,7 +2452,30 @@
     }
 
     // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना
+        // 1. आपके फोन से परीक्षाओं और छात्रों को इंटरनेट (Firebase) पर भेजने का फंक्शन
+    async function pushLocalDataToCloud() {
+      try {
+        const localExams = getStore("exams");
+        for (let ex of localExams) {
+          if (ex && ex.examCode) {
+            await db.collection("exams").doc(ex.id || ex.examCode).set(ex, { merge: true });
+          }
+        }
+        const localStudents = getStore("students");
+        for (let st of localStudents) {
+          if (st && st.username) {
+            await db.collection("students").doc(st.username.toUpperCase()).set(st, { merge: true });
+          }
+        }
+      } catch(e) {
+        console.warn("Sync error:", e);
+      }
+    }
+
+    // 2. जैसे ही पेज खुलेगा, यह अपने आप सारा डेटा इंटरनेट पर अपलोड कर देगा
     window.addEventListener("DOMContentLoaded", () => {
+      pushLocalDataToCloud(); // <-- यहाँ डेटा अपलोड चालू होगा
+
       const p = new URLSearchParams(window.location.search).get("exam");
       if (p) {
         if (state.activeStudent) navigate("student-dashboard");
@@ -2435,7 +2487,7 @@
       } else {
         navigate("student-login");
       }
-    });
+    }); 
   </script>
 </body>
 </html> 
