@@ -255,34 +255,35 @@
       },
 
       // सुपर-फास्ट और रियल-टाइम एग्ज़ाम लोडर
-      async getExams() {
-        let local = getStore("exams");
+     async getExams() {
         const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
         const now = Date.now();
 
-        // बैकग्राउंड में Firebase से तुरंत सिंक करें
-        db.collection("exams").get().then(snap => {
+        try {
+          // Seedha Firebase Firestore ke exams collection se bina kisi mapping bug ke laayein
+          const snap = await db.collection("exams").get();
           if (!snap.empty) {
             const cloudList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            const merged = new Map();
-            local.forEach(e => merged.set(e.id || e.examCode, e));
-            cloudList.forEach(e => merged.set(e.id || e.examCode, e));
-            const updated = Array.from(merged.values()).filter(e => {
+            // Safe filter taaki deleted wale 15 din baad hi hatein
+            const validExams = cloudList.filter(e => {
               if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
               return true;
             });
-            setStore("exams", updated);
-            // अगर विद्यार्थी स्क्रीन पर है तो ऑटो रिफ्रेश करें
-            if (state.view === "student-dashboard") filterStudentExamsRealtime();
+            setStore("exams", validExams);
+            return validExams;
           }
-        }).catch(() => {});
+        } catch (e) {
+          console.warn("Firestore fetch error:", e);
+        }
 
+        // Offline fallback
+        let local = getStore("exams");
         return local.filter(e => {
           if (e.isDeleted && e.deletedTimestamp && (now - e.deletedTimestamp > fifteenDaysMs)) return false;
           return true;
         });
       },
-
+    
       async getExamByCode(code) {
         const clean = (code || "").trim().toUpperCase();
         const exams = await this.getExams();
@@ -2452,30 +2453,7 @@
     }
 
     // रिफ्रेश होने पर सीधे डैशबोर्ड खोलना
-        // 1. आपके फोन से परीक्षाओं और छात्रों को इंटरनेट (Firebase) पर भेजने का फंक्शन
-    async function pushLocalDataToCloud() {
-      try {
-        const localExams = getStore("exams");
-        for (let ex of localExams) {
-          if (ex && ex.examCode) {
-            await db.collection("exams").doc(ex.id || ex.examCode).set(ex, { merge: true });
-          }
-        }
-        const localStudents = getStore("students");
-        for (let st of localStudents) {
-          if (st && st.username) {
-            await db.collection("students").doc(st.username.toUpperCase()).set(st, { merge: true });
-          }
-        }
-      } catch(e) {
-        console.warn("Sync error:", e);
-      }
-    }
-
-    // 2. जैसे ही पेज खुलेगा, यह अपने आप सारा डेटा इंटरनेट पर अपलोड कर देगा
-    window.addEventListener("DOMContentLoaded", () => {
-      pushLocalDataToCloud(); // <-- यहाँ डेटा अपलोड चालू होगा
-
+        window.addEventListener("DOMContentLoaded", () => {
       const p = new URLSearchParams(window.location.search).get("exam");
       if (p) {
         if (state.activeStudent) navigate("student-dashboard");
@@ -2487,7 +2465,7 @@
       } else {
         navigate("student-login");
       }
-    }); 
+    });
   </script>
 </body>
 </html> 
